@@ -1,3 +1,4 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:instagram_clone_flutter_firebase/utils/colors.dart';
 import 'package:instagram_clone_flutter_firebase/utils/global_variables.dart';
@@ -37,6 +38,12 @@ class _MobileScreenLayoutState extends State<MobileScreenLayout> {
 
   @override
   Widget build(BuildContext context) {
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    final items = homeScreenItems(currentUser.uid);
+
     return Scaffold(
       bottomNavigationBar: BottomNavigationBar(
         type: BottomNavigationBarType.fixed,
@@ -57,7 +64,7 @@ class _MobileScreenLayoutState extends State<MobileScreenLayout> {
         controller: pageController,
         onPageChanged: onPageChanged,
         physics: NeverScrollableScrollPhysics(),
-        children: homeScreenItems,
+        children: items,
       ),
     );
   }

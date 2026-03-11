@@ -2,9 +2,11 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:instagram_clone_flutter_firebase/methods/firestore_methods.dart';
 import 'package:instagram_clone_flutter_firebase/providers/user_provider.dart';
+import 'package:instagram_clone_flutter_firebase/screens/profile_screen.dart';
 import 'package:instagram_clone_flutter_firebase/utils/colors.dart';
 import 'package:instagram_clone_flutter_firebase/widgets/comments_bottom_sheet.dart';
 import 'package:instagram_clone_flutter_firebase/widgets/like_animation.dart';
+import 'package:instagram_clone_flutter_firebase/widgets/share_post_sheet.dart';
 import 'package:instagram_clone_flutter_firebase/widgets/text.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -20,6 +22,18 @@ class PostCard extends StatefulWidget {
 class _PostCardState extends State<PostCard> {
   bool isLikeAnimating = false;
   int commentL = 0;
+
+  String _safeString(dynamic value) {
+    if (value == null) return "";
+    return value.toString();
+  }
+
+  int _safeInt(dynamic value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return 0;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -37,9 +51,72 @@ class _PostCardState extends State<PostCard> {
     setState(() {});
   }
 
+  void _openProfile() {
+    final uid = _safeString(widget.snap["uid"]);
+    if (uid.isEmpty) return;
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => ProfileScreen(uid: uid)),
+    );
+  }
+
+  void _openComments() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder:
+          (context) => StreamBuilder(
+            stream:
+                FirebaseFirestore.instance
+                    .collection("posts")
+                    .doc(widget.snap["postId"])
+                    .collection("comments")
+                    .orderBy("commentDate", descending: true)
+                    .snapshots(),
+            builder: (
+              context,
+              AsyncSnapshot<QuerySnapshot<Map<String, dynamic>>> snapshot,
+            ) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(
+                  child: CircularProgressIndicator(color: primaryColor),
+                );
+              }
+              return CommentsBottomSheet(
+                snap: widget.snap,
+                snapshot: snapshot,
+              );
+            },
+          ),
+    );
+  }
+
+  void _openShareSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (context) {
+        return SharePostSheet(
+          postId: _safeString(widget.snap["postId"]),
+          postUrl: _safeString(widget.snap["postUrl"]),
+          postOwnerUid: _safeString(widget.snap["uid"]),
+          postOwnerUsername: _safeString(widget.snap["username"]),
+          postOwnerPhotoUrl: _safeString(widget.snap["photoUrl"]),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final user = Provider.of<UserProvider>(context).getUser;
+    final photoUrl = _safeString(widget.snap["photoUrl"]);
+    final username = _safeString(widget.snap["username"]);
+    final postId = _safeString(widget.snap["postId"]);
+    final location = _safeString(widget.snap["location"]);
+    final isSaved = user?.savedPosts.contains(postId) ?? false;
+    final shareCount = _safeInt(widget.snap["shareCount"]);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 5),
       child: Column(
@@ -49,24 +126,52 @@ class _PostCardState extends State<PostCard> {
             children: [
               Padding(
                 padding: const EdgeInsets.only(left: 10),
-                child: Container(
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(color: secondaryColor, width: 1),
-                  ),
-                  child: CircleAvatar(
-                    radius: 16,
-                    backgroundImage: NetworkImage(widget.snap["photoUrl"]),
+                child: GestureDetector(
+                  onTap: _openProfile,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(color: secondaryColor, width: 1),
+                    ),
+                    child: CircleAvatar(
+                      radius: 16,
+                      backgroundImage:
+                          photoUrl.isNotEmpty ? NetworkImage(photoUrl) : null,
+                      child:
+                          photoUrl.isEmpty
+                              ? const Icon(Icons.person, color: Colors.white)
+                              : null,
+                    ),
                   ),
                 ),
               ),
               Padding(
                 padding: const EdgeInsets.only(left: 12.0),
-                child: MyText(
-                  text: widget.snap["username"],
-                  textClr: primaryColor,
-                  textSize: 16,
-                  textWeight: FontWeight.bold,
+                child: GestureDetector(
+                  onTap: _openProfile,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      MyText(
+                        text: username,
+                        textClr: primaryColor,
+                        textSize: 16,
+                        textWeight: FontWeight.bold,
+                      ),
+                      if (location.isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          location,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: secondaryColor,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
               ),
               Spacer(),
@@ -264,43 +369,9 @@ class _PostCardState extends State<PostCard> {
                 textSize: 12,
               ),
               GestureDetector(
-                onTap: () {
-                  showModalBottomSheet(
-                    context: context,
-                    isScrollControlled: true,
-                    useSafeArea: true,
-                    builder:
-                        (context) => StreamBuilder(
-                          stream:
-                              FirebaseFirestore.instance
-                                  .collection("posts")
-                                  .doc(widget.snap["postId"])
-                                  .collection("comments")
-                                  .orderBy("commentDate", descending: true)
-                                  .snapshots(),
-                          builder: (
-                            context,
-                            AsyncSnapshot<QuerySnapshot<Map<String, dynamic>>>
-                            snapshot,
-                          ) {
-                            if (snapshot.connectionState ==
-                                ConnectionState.waiting) {
-                              return const Center(
-                                child: CircularProgressIndicator(
-                                  color: primaryColor,
-                                ),
-                              );
-                            }
-                            return CommentsBottomSheet(
-                              snap: widget.snap,
-                              snapshot: snapshot,
-                            );
-                          },
-                        ),
-                  );
-                },
-                child: Padding(
-                  padding: const EdgeInsets.only(left: 15, right: 3),
+                onTap: _openComments,
+                child: const Padding(
+                  padding: EdgeInsets.only(left: 15, right: 3),
                   child: Icon(
                     Icons.messenger_outline,
                     color: primaryColor,
@@ -308,24 +379,47 @@ class _PostCardState extends State<PostCard> {
                   ),
                 ),
               ),
-              MyText(
-                text: commentL.toString(),
-                textClr: primaryColor,
-                textSize: 12,
+              GestureDetector(
+                onTap: _openComments,
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 4, right: 3),
+                  child: MyText(
+                    text: commentL.toString(),
+                    textClr: primaryColor,
+                    textSize: 12,
+                  ),
+                ),
               ),
               GestureDetector(
-                onTap: () {},
-                child: Padding(
-                  padding: const EdgeInsets.only(left: 15, right: 4),
+                onTap: _openShareSheet,
+                child: const Padding(
+                  padding: EdgeInsets.only(left: 15, right: 4),
                   child: Icon(Icons.send, color: primaryColor, size: 28),
                 ),
               ),
-              MyText(text: "0", textClr: primaryColor, textSize: 12),
-              Spacer(),
+              MyText(
+                text: shareCount.toString(),
+                textClr: primaryColor,
+                textSize: 12,
+              ),
+              const Spacer(),
               IconButton(
-                onPressed: () {},
+                onPressed: () async {
+                  if (user == null || postId.isEmpty) return;
+                  await FirestoreMethods().toggleSavePost(
+                    uid: user.uid,
+                    postId: postId,
+                    isSaved: isSaved,
+                  );
+                  if (context.mounted) {
+                    await Provider.of<UserProvider>(
+                      context,
+                      listen: false,
+                    ).refreshUser();
+                  }
+                },
                 icon: Icon(
-                  Icons.bookmark_border,
+                  isSaved ? Icons.bookmark : Icons.bookmark_border,
                   color: primaryColor,
                   size: 28,
                 ),

@@ -4,6 +4,7 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:instagram_clone_flutter_firebase/providers/user_provider.dart';
 import 'package:instagram_clone_flutter_firebase/utils/colors.dart';
 import 'package:instagram_clone_flutter_firebase/utils/global_variables.dart';
+import 'package:instagram_clone_flutter_firebase/screens/saved_screen.dart';
 import 'package:instagram_clone_flutter_firebase/widgets/post_card.dart';
 import 'package:provider/provider.dart';
 
@@ -39,8 +40,14 @@ class FeedScreen extends StatelessWidget {
                 ),
                 actions: [
                   IconButton(
-                    onPressed: () {},
-                    icon: const Icon(Icons.message, color: primaryColor),
+                    onPressed: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const SavedScreen(),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.bookmark_border, color: primaryColor),
                   ),
                 ],
               ),

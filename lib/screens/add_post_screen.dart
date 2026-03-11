@@ -11,7 +11,8 @@ import 'package:instagram_clone_flutter_firebase/widgets/text_button.dart';
 import 'package:provider/provider.dart';
 
 class AddPostScreen extends StatefulWidget {
-  const AddPostScreen({super.key});
+  final Uint8List? initialFile;
+  const AddPostScreen({super.key, this.initialFile});
 
   @override
   State<AddPostScreen> createState() => _AddPostScreenState();
@@ -19,44 +20,119 @@ class AddPostScreen extends StatefulWidget {
 
 class _AddPostScreenState extends State<AddPostScreen> {
   final TextEditingController captionController = TextEditingController();
+  final TextEditingController locationController = TextEditingController();
   Uint8List? _file;
   bool _isLoading = false;
-  _selectImage() {
-    return showDialog(
+  bool _createMenuShown = false;
+  String _createType = "post";
+
+  Future<void> _showCreateMenu() async {
+    final type = await showModalBottomSheet<String>(
       context: context,
-      builder: (context) {
-        return SimpleDialog(
-          title: const Text("Create a post"),
-          children: [
-            SimpleDialogOption(
-              padding: EdgeInsets.all(15),
-              onPressed: () async {
-                Navigator.of(context).pop();
-                Uint8List file = await pickImage(ImageSource.camera);
-                setState(() {
-                  _file = file;
-                });
-              },
-              child: Text("Take a photo"),
+      backgroundColor: mobileBackgroundColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder:
+          (context) => SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.auto_awesome, color: primaryColor),
+                  title: const Text("Story"),
+                  onTap: () => Navigator.pop(context, "story"),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.grid_on, color: primaryColor),
+                  title: const Text("Post"),
+                  onTap: () => Navigator.pop(context, "post"),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.video_library, color: primaryColor),
+                  title: const Text("Reel"),
+                  onTap: () => Navigator.pop(context, "reel"),
+                ),
+              ],
             ),
-            SimpleDialogOption(
-              padding: EdgeInsets.all(15),
-              onPressed: () async {
-                Navigator.of(context).pop();
-                Uint8List file = await pickImage(ImageSource.gallery);
-                setState(() {
-                  _file = file;
-                });
-              },
-              child: Text("Upload from gallery"),
+          ),
+    );
+    if (!mounted || type == null) return;
+    _createType = type;
+
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      backgroundColor: mobileBackgroundColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder:
+          (context) => SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.photo_camera, color: primaryColor),
+                  title: const Text("Take photo"),
+                  onTap: () => Navigator.pop(context, ImageSource.camera),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.photo, color: primaryColor),
+                  title: const Text("Choose from gallery"),
+                  onTap: () => Navigator.pop(context, ImageSource.gallery),
+                ),
+              ],
             ),
-          ],
-        );
-      },
+          ),
+    );
+    if (!mounted || source == null) return;
+
+    if (_createType == "reel") {
+      final picker = ImagePicker();
+      final video = await picker.pickVideo(source: source);
+      if (video == null) return;
+      if (!mounted) return;
+      showSnackBar(
+        context: context,
+        content: "Reel video selected (upload coming soon).",
+        clr: successColor,
+      );
+      return;
+    }
+
+    final file = await pickImage(source);
+    if (file == null) return;
+
+    if (_createType == "post") {
+      setState(() {
+        _file = file;
+      });
+      return;
+    }
+
+    showSnackBar(
+      context: context,
+      content: "Story image selected (upload coming soon).",
+      clr: successColor,
     );
   }
 
+  _selectImage() {
+    if (_isLoading) return;
+    return _showCreateMenu();
+  }
+
   postImage(String uid, String username, String profileUrl) async {
+    if (_isLoading) return;
+    if (_file == null || _file!.isEmpty) {
+      showSnackBar(
+        context: context,
+        content: "Please select an image first.",
+        clr: errorColor,
+      );
+      return;
+    }
+
     setState(() {
       _isLoading = true;
     });
@@ -67,7 +143,9 @@ class _AddPostScreenState extends State<AddPostScreen> {
         uid,
         username,
         profileUrl,
+        location: locationController.text.trim(),
       );
+      if (!mounted) return;
       if (message == "Post Successfully Added!") {
         setState(() {
           _isLoading = false;
@@ -84,21 +162,14 @@ class _AddPostScreenState extends State<AddPostScreen> {
         setState(() {
           _isLoading = false;
         });
-        if (mounted) {
-          showSnackBar(context: context, content: message, clr: errorColor);
-        }
+        showSnackBar(context: context, content: message, clr: errorColor);
       }
     } catch (err) {
+      if (!mounted) return;
       setState(() {
         _isLoading = false;
       });
-      if (mounted) {
-        showSnackBar(
-          context: context,
-          content: err.toString(),
-          clr: errorColor,
-        );
-      }
+      showSnackBar(context: context, content: err.toString(), clr: errorColor);
     }
   }
 
@@ -109,9 +180,25 @@ class _AddPostScreenState extends State<AddPostScreen> {
   }
 
   @override
+  void initState() {
+    super.initState();
+    if (widget.initialFile != null) {
+      _file = widget.initialFile;
+      _createMenuShown = true;
+    } else {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_createMenuShown) return;
+        _createMenuShown = true;
+        _showCreateMenu();
+      });
+    }
+  }
+
+  @override
   void dispose() {
     super.dispose();
     captionController.dispose();
+    locationController.dispose();
   }
 
   @override
@@ -124,10 +211,7 @@ class _AddPostScreenState extends State<AddPostScreen> {
       child: Scaffold(
         appBar: AppBar(
           backgroundColor: mobileBackgroundColor,
-          leading: IconButton(
-            icon: Icon(Icons.arrow_back, color: primaryColor),
-            onPressed: () => clearImage(),
-          ),
+          automaticallyImplyLeading: false,
           title: MyText(text: "New post", textClr: primaryColor, textSize: 22),
           actions: [
             _file == null
@@ -204,6 +288,32 @@ class _AddPostScreenState extends State<AddPostScreen> {
                             suffix: InkWell(
                               child: Icon(Icons.close, color: primaryColor),
                               onTap: () => captionController.clear(),
+                            ),
+                            filled: true,
+                            fillColor: mobileBackgroundColor,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: MediaQuery.of(context).size.width * 0.8,
+                        child: TextField(
+                          controller: locationController,
+                          maxLines: 1,
+                          decoration: InputDecoration(
+                            border: InputBorder.none,
+                            hintText: "Add location",
+                            labelStyle: TextStyle(
+                              color: primaryColor,
+                              fontSize: 16,
+                            ),
+                            prefixIcon: const Icon(
+                              Icons.location_on_outlined,
+                              color: secondaryColor,
+                            ),
+                            suffix: InkWell(
+                              child: const Icon(Icons.close, color: primaryColor),
+                              onTap: () => locationController.clear(),
                             ),
                             filled: true,
                             fillColor: mobileBackgroundColor,

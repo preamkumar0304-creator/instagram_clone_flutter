@@ -9,6 +9,8 @@ class Post {
   final String uid;
   final String username;
   final String profileUrl;
+  final int shareCount;
+  final String location;
 
   Post({
     required this.postId,
@@ -19,6 +21,8 @@ class Post {
     required this.uid,
     required this.username,
     required this.profileUrl,
+    required this.shareCount,
+    required this.location,
   });
 
   Map<String, dynamic> toMap() => {
@@ -30,6 +34,8 @@ class Post {
     "uid": uid,
     "username": username,
     "photoUrl": profileUrl,
+    "shareCount": shareCount,
+    "location": location,
   };
 
   static Post fromSnap(DocumentSnapshot snap) {
@@ -43,6 +49,11 @@ class Post {
       uid: snapshot["uid"],
       username: snapshot["username"],
       profileUrl: snapshot["profileUrl"],
+      shareCount:
+          snapshot["shareCount"] is int
+              ? snapshot["shareCount"] as int
+              : (snapshot["shareCount"] as num?)?.toInt() ?? 0,
+      location: (snapshot["location"] ?? "") as String,
     );
   }
 }

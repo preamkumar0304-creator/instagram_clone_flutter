@@ -8,8 +8,42 @@ class AuthMethods {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
+  Future<void> _ensureUserDoc(User user) async {
+    final userDoc = await _firestore.collection("users").doc(user.uid).get();
+    if (userDoc.exists) return;
+
+    final baseUsername = (user.email ?? "user").split("@").first;
+    String uniqueUsername =
+        baseUsername.trim().isEmpty ? "user" : baseUsername.trim();
+    int counter = 1;
+    while (true) {
+      final usernameCheck =
+          await _firestore
+              .collection("users")
+              .where("username", isEqualTo: uniqueUsername)
+              .get();
+      if (usernameCheck.docs.isEmpty) {
+        break;
+      }
+      uniqueUsername = "$baseUsername$counter";
+      counter++;
+    }
+
+    await _firestore.collection("users").doc(user.uid).set({
+      "uid": user.uid,
+      "email": user.email ?? "",
+      "username": uniqueUsername,
+      "bio": "",
+      "photoUrl": "https://via.placeholder.com/150",
+      "followers": [],
+      "following": [],
+      "savedPosts": [],
+    });
+  }
+
   Future<UserModel> getUserDetails() async {
     User currentUser = _auth.currentUser!;
+    await _ensureUserDoc(currentUser);
     DocumentSnapshot snap =
         await _firestore.collection("users").doc(currentUser.uid).get();
     return UserModel.fromSnap(snap);
@@ -27,6 +61,11 @@ class AuthMethods {
           email: email,
           password: password,
         );
+        // Ensure a user document exists for this account
+        final currentUser = _auth.currentUser;
+        if (currentUser != null) {
+          await _ensureUserDoc(currentUser);
+        }
         message = "User Logged In Successfully!";
       } else {
         message = "Please enter all the fields.";
@@ -63,15 +102,20 @@ class AuthMethods {
         return "Please fill out all the fields.";
       }
 
-      // 🔹 Check for existing username
+      // 🔹 Create Firebase user
+      UserCredential userCred = await _auth.createUserWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+
+      // 🔹 Check for existing username (after auth so rules allow read)
       String uniqueUsername = username.trim();
       int counter = 1;
       while (true) {
-        final QuerySnapshot usernameCheck =
-            await _firestore
-                .collection("users")
-                .where("username", isEqualTo: uniqueUsername)
-                .get();
+        final QuerySnapshot usernameCheck = await _firestore
+            .collection("users")
+            .where("username", isEqualTo: uniqueUsername)
+            .get();
 
         if (usernameCheck.docs.isEmpty) {
           break;
@@ -80,18 +124,22 @@ class AuthMethods {
         counter++;
       }
 
-      // 🔹 Create Firebase user
-      UserCredential userCred = await _auth.createUserWithEmailAndPassword(
-        email: email,
-        password: password,
-      );
-
       // 🔹 Upload profile image
-      String photoUrl = await StorageMethods().uploadImageToStorage(
-        "profilePics",
-        file,
-        false,
-      );
+      String photoUrl = "";
+      try {
+        photoUrl = await StorageMethods().uploadImageToStorage(
+          "profilePics",
+          file,
+          false,
+        );
+      } on FirebaseException catch (e) {
+        // If Storage rules/App Check block upload, continue with placeholder
+        if (e.code == "unauthorized" || e.code == "unauthenticated") {
+          photoUrl = "";
+        } else {
+          rethrow;
+        }
+      }
 
       if (photoUrl.isEmpty) {
         photoUrl = "https://via.placeholder.com/150";
@@ -106,6 +154,7 @@ class AuthMethods {
         photoUrl: photoUrl,
         followers: [],
         following: [],
+        savedPosts: [],
       );
 
       // 🔹 Store in Firestore

@@ -12,7 +12,12 @@
           "package_name": "com.example.socialmedia"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "99240422561-8d702hqqi3jtnh9ov3icdgki4m377h51.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyDeRMVm3qIlOthSkcvYhnbZomX9o9ekGo4"
@@ -20,7 +25,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "99240422561-8d702hqqi3jtnh9ov3icdgki4m377h51.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }

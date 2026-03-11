@@ -14,6 +14,11 @@ class SearchScreen extends StatefulWidget {
 class _SearchScreenState extends State<SearchScreen> {
   final TextEditingController searchController = TextEditingController();
   bool isShowUsers = false;
+
+  String _safeString(dynamic value) {
+    if (value == null) return "";
+    return value.toString();
+  }
   @override
   void dispose() {
     searchController.dispose();
@@ -77,6 +82,12 @@ class _SearchScreenState extends State<SearchScreen> {
                     return ListView.builder(
                       itemCount: (snapshot.data! as dynamic).docs.length,
                       itemBuilder: (context, index) {
+                        final doc = (snapshot.data! as dynamic).docs[index];
+                        final data =
+                            (doc.data() as Map<String, dynamic>?) ?? {};
+                        final username = _safeString(data["username"]);
+                        final photoUrl = _safeString(data["photoUrl"]);
+
                         return InkWell(
                           onTap:
                               () => Navigator.of(context).push(
@@ -84,8 +95,7 @@ class _SearchScreenState extends State<SearchScreen> {
                                   builder:
                                       (context) => ProfileScreen(
                                         uid:
-                                            (snapshot.data! as dynamic)
-                                                .docs[index]["uid"],
+                                            _safeString(data["uid"]),
                                       ),
                                 ),
                               ),
@@ -99,15 +109,21 @@ class _SearchScreenState extends State<SearchScreen> {
                                 ),
                               ),
                               child: CircleAvatar(
-                                backgroundImage: NetworkImage(
-                                  (snapshot.data! as dynamic)
-                                      .docs[index]["photoUrl"],
-                                ),
+                                backgroundImage:
+                                    photoUrl.isNotEmpty
+                                        ? NetworkImage(photoUrl)
+                                        : null,
+                                child:
+                                    photoUrl.isEmpty
+                                        ? const Icon(
+                                          Icons.person,
+                                          color: Colors.white,
+                                        )
+                                        : null,
                               ),
                             ),
                             title: Text(
-                              (snapshot.data! as dynamic)
-                                  .docs[index]["username"],
+                              username,
                             ),
                           ),
                         );
@@ -130,10 +146,16 @@ class _SearchScreenState extends State<SearchScreen> {
                           crossAxisCount: 2,
                         ),
                     itemCount: snapshot.data!.docs.length,
-                    itemBuilder:
-                        (context, index) => Image.network(
-                          (snapshot.data! as dynamic).docs[index]["postUrl"],
-                        ),
+                    itemBuilder: (context, index) {
+                      final doc = (snapshot.data! as dynamic).docs[index];
+                      final data =
+                          (doc.data() as Map<String, dynamic>?) ?? {};
+                      final postUrl = _safeString(data["postUrl"]);
+                      if (postUrl.isEmpty) {
+                        return const SizedBox.shrink();
+                      }
+                      return Image.network(postUrl);
+                    },
                   );
                 },
               ),

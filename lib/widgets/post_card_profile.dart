@@ -5,6 +5,7 @@ import 'package:instagram_clone_flutter_firebase/providers/user_provider.dart';
 import 'package:instagram_clone_flutter_firebase/utils/colors.dart';
 import 'package:instagram_clone_flutter_firebase/widgets/comments_bottom_sheet.dart';
 import 'package:instagram_clone_flutter_firebase/widgets/like_animation.dart';
+import 'package:instagram_clone_flutter_firebase/widgets/share_post_sheet.dart';
 import 'package:instagram_clone_flutter_firebase/widgets/text.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -20,6 +21,17 @@ class PostCardProfile extends StatefulWidget {
 class _PostCardState extends State<PostCardProfile> {
   bool isLikeAnimating = false;
   int commentL = 0;
+
+  int _safeInt(dynamic value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return 0;
+  }
+
+  String _safeString(dynamic value) {
+    if (value == null) return "";
+    return value.toString();
+  }
 
   @override
   void initState() {
@@ -40,8 +52,9 @@ class _PostCardState extends State<PostCardProfile> {
   @override
   Widget build(BuildContext context) {
     final user = Provider.of<UserProvider>(context).getUser;
-    final bool isOwner = user != null && user.uid == widget.snap["uid"]; // 🔹 NEW
-
+    final bool isOwner = user != null && user.uid == widget.snap["uid"];
+    final shareCount = _safeInt(widget.snap["shareCount"]);
+    final location = _safeString(widget.snap["location"]);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 5),
       child: Column(
@@ -64,11 +77,28 @@ class _PostCardState extends State<PostCardProfile> {
               ),
               Padding(
                 padding: const EdgeInsets.only(left: 12.0),
-                child: MyText(
-                  text: widget.snap["username"],
-                  textClr: primaryColor,
-                  textSize: 16,
-                  textWeight: FontWeight.bold,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    MyText(
+                      text: widget.snap["username"],
+                      textClr: primaryColor,
+                      textSize: 16,
+                      textWeight: FontWeight.bold,
+                    ),
+                    if (location.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        location,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: secondaryColor,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
               ),
               const Spacer(),
@@ -146,7 +176,7 @@ class _PostCardState extends State<PostCardProfile> {
             ),
           ),
 
-          // --- ACTION ROW ---
+                    // --- ACTION ROW ---
           Row(
             children: [
               GestureDetector(
@@ -213,34 +243,87 @@ class _PostCardState extends State<PostCardProfile> {
                 textClr: primaryColor,
                 textSize: 12,
               ),
-              const Spacer(),
-
-              // 🔹 NEW — BOOST BUTTON (only visible for the post owner)
-              if (isOwner)
-                TextButton.icon(
-                  onPressed: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                          "🚀 Boost feature will be available in a future update!",
-                        ),
-                        backgroundColor: secondaryColor,
-                        behavior: SnackBarBehavior.floating,
-                        duration: Duration(seconds: 2),
-                      ),
-                    );
-                  },
-                  icon: const Icon(Icons.bolt, color: Colors.amber, size: 22),
-                  label: const Text(
-                    "Boost",
-                    style: TextStyle(
-                      color: Colors.amber,
-                      fontWeight: FontWeight.bold,
+              GestureDetector(
+                onTap: () {
+                  showModalBottomSheet(
+                    context: context,
+                    isScrollControlled: true,
+                    useSafeArea: true,
+                    builder: (context) => SharePostSheet(
+                      postId: _safeString(widget.snap["postId"]),
+                      postUrl: _safeString(widget.snap["postUrl"]),
+                      postOwnerUid: _safeString(widget.snap["uid"]),
+                      postOwnerUsername: _safeString(widget.snap["username"]),
+                      postOwnerPhotoUrl: _safeString(widget.snap["photoUrl"]),
                     ),
-                  ),
+                  );
+                },
+                child: const Padding(
+                  padding: EdgeInsets.only(left: 15, right: 4),
+                  child: Icon(Icons.send, color: primaryColor, size: 28),
                 ),
+              ),
+              MyText(
+                text: shareCount.toString(),
+                textClr: primaryColor,
+                textSize: 12,
+              ),
+              const Spacer(),
             ],
           ),
+
+          if (isOwner)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              child: Row(
+                children: [
+                  TextButton(
+                    onPressed: () {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            "Insights will be available in a future update.",
+                          ),
+                          backgroundColor: secondaryColor,
+                          behavior: SnackBarBehavior.floating,
+                          duration: Duration(seconds: 2),
+                        ),
+                      );
+                    },
+                    child: const Text(
+                      "View insights",
+                      style: TextStyle(
+                        color: primaryColor,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  TextButton.icon(
+                    onPressed: () {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            "Boost feature will be available in a future update!",
+                          ),
+                          backgroundColor: secondaryColor,
+                          behavior: SnackBarBehavior.floating,
+                          duration: Duration(seconds: 2),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.bolt, color: Colors.amber, size: 20),
+                    label: const Text(
+                      "Boost",
+                      style: TextStyle(
+                        color: Colors.amber,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
 
           // --- CAPTION ---
           Padding(
@@ -288,3 +371,6 @@ class _PostCardState extends State<PostCardProfile> {
     );
   }
 }
+
+
+

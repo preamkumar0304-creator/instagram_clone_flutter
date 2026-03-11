@@ -1,3 +1,4 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/svg.dart';
 import 'package:instagram_clone_flutter_firebase/utils/colors.dart';
@@ -42,6 +43,12 @@ class _WebScreenLayoutState extends State<WebScreenLayout> {
 
   @override
   Widget build(BuildContext context) {
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    final items = homeScreenItems(currentUser.uid);
+
     return Scaffold(
       appBar: AppBar(
         backgroundColor: mobileBackgroundColor,
@@ -92,7 +99,7 @@ class _WebScreenLayoutState extends State<WebScreenLayout> {
       body: PageView(
         controller: pageController,
         onPageChanged: onPageChanged,
-        children: homeScreenItems,
+        children: items,
       ),
     );
   }

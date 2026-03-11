@@ -8,6 +8,7 @@ class UserModel {
   final String bio;
   final List followers;
   final List following;
+  final List savedPosts;
 
   const UserModel({
     required this.uid,
@@ -17,6 +18,7 @@ class UserModel {
     required this.bio,
     required this.followers,
     required this.following,
+    required this.savedPosts,
   });
 
   // Convert to Map (for saving to Firestore)
@@ -28,6 +30,7 @@ class UserModel {
         "bio": bio,
         "followers": followers,
         "following": following,
+        "savedPosts": savedPosts,
       };
 
   // ✅ Safe factory method with null checks
@@ -49,6 +52,7 @@ class UserModel {
       bio: snapshot["bio"] ?? '',
       followers: snapshot["followers"] ?? [],
       following: snapshot["following"] ?? [],
+      savedPosts: snapshot["savedPosts"] ?? [],
     );
   }
 }
