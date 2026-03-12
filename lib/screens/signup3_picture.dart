@@ -19,7 +19,8 @@ class SignupPicture extends StatefulWidget {
 class _SignupPictureState extends State<SignupPicture> {
   Uint8List? image;
   void selectImage() async {
-    Uint8List im = await pickImage(ImageSource.gallery);
+    final im = await pickImage(ImageSource.gallery);
+    if (im == null) return;
     setState(() {
       image = im;
     });
@@ -85,7 +86,7 @@ class _SignupPictureState extends State<SignupPicture> {
                             (context) => SignupUsername(
                               email: widget.email,
                               password: widget.password,
-                              file: image!,
+                              file: image,
                             ),
                       ),
                     );

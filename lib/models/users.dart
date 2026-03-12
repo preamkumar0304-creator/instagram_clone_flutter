@@ -6,6 +6,7 @@ class UserModel {
   final String photoUrl;
   final String username;
   final String bio;
+  final String gender;
   final List followers;
   final List following;
   final List savedPosts;
@@ -16,6 +17,7 @@ class UserModel {
     required this.photoUrl,
     required this.username,
     required this.bio,
+    required this.gender,
     required this.followers,
     required this.following,
     required this.savedPosts,
@@ -28,6 +30,7 @@ class UserModel {
         "photoUrl": photoUrl,
         "username": username,
         "bio": bio,
+        "gender": gender,
         "followers": followers,
         "following": following,
         "savedPosts": savedPosts,
@@ -50,6 +53,7 @@ class UserModel {
       photoUrl: snapshot["photoUrl"] ?? '',
       username: snapshot["username"] ?? '',
       bio: snapshot["bio"] ?? '',
+      gender: snapshot["gender"] ?? 'unspecified',
       followers: snapshot["followers"] ?? [],
       following: snapshot["following"] ?? [],
       savedPosts: snapshot["savedPosts"] ?? [],

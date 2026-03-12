@@ -14,7 +14,7 @@ import 'package:instagram_clone_flutter_firebase/widgets/textfield.dart';
 class SignupUsername extends StatefulWidget {
   final String email;
   final String password;
-  final Uint8List file;
+  final Uint8List? file;
   const SignupUsername({
     super.key,
     required this.email,
@@ -30,6 +30,7 @@ class _SignupUsernameState extends State<SignupUsername> {
   final TextEditingController usernameContoller = TextEditingController();
   final TextEditingController bioController = TextEditingController();
   bool _isLoading = false;
+  String _selectedGender = "unspecified";
 
   @override
   void dispose() {
@@ -82,6 +83,40 @@ class _SignupUsernameState extends State<SignupUsername> {
                 ),
               ),
               Padding(
+                padding: const EdgeInsets.only(top: 5, bottom: 10),
+                child: DropdownButtonFormField<String>(
+                  value: _selectedGender,
+                  decoration: const InputDecoration(
+                    labelText: "Gender",
+                    labelStyle: TextStyle(color: primaryColor),
+                    enabledBorder: OutlineInputBorder(
+                      borderSide: BorderSide(color: secondaryColor),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderSide: BorderSide(color: primaryColor),
+                    ),
+                  ),
+                  dropdownColor: mobileBackgroundColor,
+                  style: const TextStyle(color: primaryColor),
+                  iconEnabledColor: primaryColor,
+                  items: const [
+                    DropdownMenuItem(
+                      value: "unspecified",
+                      child: Text("Prefer not to say"),
+                    ),
+                    DropdownMenuItem(value: "male", child: Text("Male")),
+                    DropdownMenuItem(value: "female", child: Text("Female")),
+                    DropdownMenuItem(value: "other", child: Text("Other")),
+                  ],
+                  onChanged: (value) {
+                    if (value == null) return;
+                    setState(() {
+                      _selectedGender = value;
+                    });
+                  },
+                ),
+              ),
+              Padding(
                 padding: const EdgeInsets.only(top: 5),
                 child: MyElevatedButton(
                   onPressed: () async {
@@ -105,6 +140,7 @@ class _SignupUsernameState extends State<SignupUsername> {
                           file: widget.file,
                           username: usernameContoller.text.trim(),
                           bio: bioController.text.trim(),
+                          gender: _selectedGender,
                         );
 
                     setState(() {

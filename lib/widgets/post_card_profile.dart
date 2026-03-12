@@ -21,10 +21,16 @@ class PostCardProfile extends StatefulWidget {
 class _PostCardState extends State<PostCardProfile> {
   bool isLikeAnimating = false;
   int commentL = 0;
+  bool _hasRecordedView = false;
 
   int _safeInt(dynamic value) {
     if (value is int) return value;
     if (value is num) return value.toInt();
+    return 0;
+  }
+
+  int _safeListLength(dynamic value) {
+    if (value is List) return value.length;
     return 0;
   }
 
@@ -33,10 +39,468 @@ class _PostCardState extends State<PostCardProfile> {
     return value.toString();
   }
 
+  String _formatCount(int value) {
+    if (value < 1000) return value.toString();
+    if (value < 1000000) {
+      final rounded = (value / 100).round() / 10;
+      return "${rounded.toStringAsFixed(rounded % 1 == 0 ? 0 : 1)}k";
+    }
+    final rounded = (value / 100000).round() / 10;
+    return "${rounded.toStringAsFixed(rounded % 1 == 0 ? 0 : 1)}m";
+  }
+
+  TableRow _insightsRow({
+    required String label,
+    required String value,
+    bool isHeader = false,
+  }) {
+    final textStyle = TextStyle(
+      color: isHeader ? primaryColor : secondaryColor,
+      fontSize: isHeader ? 13 : 12,
+      fontWeight: isHeader ? FontWeight.w700 : FontWeight.w500,
+    );
+    return TableRow(
+      decoration: isHeader
+          ? const BoxDecoration(color: Color(0xFF1C1F24))
+          : null,
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          child: Text(label, style: textStyle),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          child: Text(
+            value,
+            style: textStyle.copyWith(
+              color: isHeader ? primaryColor : primaryColor,
+            ),
+            textAlign: TextAlign.right,
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _showBoostSheet() {
+    final options = [
+      {
+        "title": "Free for 30 days",
+        "subtitle": "Trial boost for new posts",
+        "days": 30,
+        "interval": 6,
+      },
+      {
+        "title": "Rs 199 - 3 days",
+        "subtitle": "Reach ~1.5k-3k people",
+        "days": 3,
+        "interval": 4,
+      },
+      {
+        "title": "Rs 399 - 7 days",
+        "subtitle": "Reach ~4k-7k people",
+        "days": 7,
+        "interval": 5,
+      },
+      {
+        "title": "Rs 799 - 14 days",
+        "subtitle": "Reach ~10k-18k people",
+        "days": 14,
+        "interval": 6,
+      },
+    ];
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: mobileBackgroundColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) {
+        int selectedIndex = 0;
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            return SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 36,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: secondaryColor,
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    const Text(
+                      "Boost post",
+                      style: TextStyle(
+                        color: primaryColor,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    ...List.generate(options.length, (index) {
+                      final option = options[index];
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        decoration: BoxDecoration(
+                          border: Border.all(
+                            color:
+                                selectedIndex == index
+                                    ? blueColor
+                                    : secondaryColor,
+                          ),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: RadioListTile<int>(
+                          value: index,
+                          groupValue: selectedIndex,
+                          onChanged: (value) {
+                            if (value == null) return;
+                            setSheetState(() => selectedIndex = value);
+                          },
+                          activeColor: blueColor,
+                          title: Text(
+                            option["title"] as String,
+                            style: const TextStyle(color: primaryColor),
+                          ),
+                          subtitle: Text(
+                            option["subtitle"] as String,
+                            style: const TextStyle(color: secondaryColor),
+                          ),
+                        ),
+                      );
+                    }),
+                    const SizedBox(height: 6),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: () {
+                          Navigator.pop(context);
+                          final selected = options[selectedIndex];
+                          final days = selected["days"] as int? ?? 7;
+                          final interval = selected["interval"] as int? ?? 5;
+                          final postId = _safeString(widget.snap["postId"]);
+                          if (postId.isNotEmpty) {
+                            FirebaseFirestore.instance
+                                .collection("posts")
+                                .doc(postId)
+                                .update({
+                                  "isBoosted": true,
+                                  "boostInterval": interval,
+                                  "boostedAt": DateTime.now(),
+                                  "boostExpiresAt":
+                                      DateTime.now().add(Duration(days: days)),
+                                });
+                          }
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text("Boost enabled."),
+                              backgroundColor: secondaryColor,
+                              behavior: SnackBarBehavior.floating,
+                              duration: Duration(seconds: 2),
+                            ),
+                          );
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: blueColor,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: const Text(
+                          "Continue",
+                          style: TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showInsightsSheet() {
+    final postId = _safeString(widget.snap["postId"]);
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: mobileBackgroundColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) {
+        final stream =
+            postId.isNotEmpty
+                ? FirebaseFirestore.instance
+                    .collection("posts")
+                    .doc(postId)
+                    .snapshots()
+                : null;
+        return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+          stream: stream,
+          builder: (context, snapshot) {
+            final data =
+                snapshot.data?.data() ??
+                (widget.snap is Map<String, dynamic>
+                    ? widget.snap as Map<String, dynamic>
+                    : <String, dynamic>{});
+
+            final metrics = [
+              {
+                "label": "Reach",
+                "value": _safeInt(data["reach"]),
+              },
+              {
+                "label": "Impressions",
+                "value": _safeInt(data["impressions"]),
+              },
+              {
+                "label": "Likes",
+                "value": _safeListLength(data["likes"]),
+              },
+              {
+                "label": "Comments",
+                "value":
+                    data.containsKey("commentCount")
+                        ? _safeInt(data["commentCount"])
+                        : commentL,
+              },
+              {
+                "label": "Saves",
+                "value": _safeInt(data["saves"]),
+              },
+              {
+                "label": "Profile visits",
+                "value": _safeInt(data["profileVisits"]),
+              },
+            ];
+
+            final genderBreakdown = data["genderBreakdown"];
+            final male =
+                genderBreakdown is Map
+                    ? _safeInt(genderBreakdown["male"])
+                    : 0;
+            final female =
+                genderBreakdown is Map
+                    ? _safeInt(genderBreakdown["female"])
+                    : 0;
+            final other =
+                genderBreakdown is Map
+                    ? _safeInt(genderBreakdown["other"])
+                    : 0;
+
+            return SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 36,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: secondaryColor,
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    const Text(
+                      "Post insights",
+                      style: TextStyle(
+                        color: primaryColor,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Container(
+                      decoration: BoxDecoration(
+                        border: Border.all(color: secondaryColor),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Table(
+                        columnWidths: const {
+                          0: FlexColumnWidth(2),
+                          1: FlexColumnWidth(1),
+                        },
+                        defaultVerticalAlignment:
+                            TableCellVerticalAlignment.middle,
+                        children: [
+                          _insightsRow(
+                            label: "Metric",
+                            value: "Value",
+                            isHeader: true,
+                          ),
+                          ...metrics.map(
+                            (metric) => _insightsRow(
+                              label: metric["label"] as String,
+                              value: _formatCount(metric["value"] as int),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        "Audience by gender",
+                        style: const TextStyle(
+                          color: primaryColor,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      decoration: BoxDecoration(
+                        border: Border.all(color: secondaryColor),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Table(
+                        columnWidths: const {
+                          0: FlexColumnWidth(1),
+                          1: FlexColumnWidth(1),
+                          2: FlexColumnWidth(1),
+                        },
+                        defaultVerticalAlignment:
+                            TableCellVerticalAlignment.middle,
+                        children: [
+                          TableRow(
+                            decoration:
+                                const BoxDecoration(color: Color(0xFF1C1F24)),
+                            children: const [
+                              Padding(
+                                padding: EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 8,
+                                ),
+                                child: Text(
+                                  "Male",
+                                  style: TextStyle(
+                                    color: primaryColor,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                              Padding(
+                                padding: EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 8,
+                                ),
+                                child: Text(
+                                  "Female",
+                                  style: TextStyle(
+                                    color: primaryColor,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                              Padding(
+                                padding: EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 8,
+                                ),
+                                child: Text(
+                                  "Other",
+                                  style: TextStyle(
+                                    color: primaryColor,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          TableRow(
+                            children: [
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 8,
+                                ),
+                                child: Text(
+                                  _formatCount(male),
+                                  style: const TextStyle(
+                                    color: primaryColor,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 8,
+                                ),
+                                child: Text(
+                                  _formatCount(female),
+                                  style: const TextStyle(
+                                    color: primaryColor,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 8,
+                                ),
+                                child: Text(
+                                  _formatCount(other),
+                                  style: const TextStyle(
+                                    color: primaryColor,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   @override
   void initState() {
     super.initState();
     getComments();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _recordViewIfNeeded();
   }
 
   getComments() async {
@@ -47,6 +511,22 @@ class _PostCardState extends State<PostCardProfile> {
         .get();
     commentL = snap.docs.length;
     setState(() {});
+  }
+
+  Future<void> _recordViewIfNeeded() async {
+    if (_hasRecordedView) return;
+    final user = Provider.of<UserProvider>(context).getUser;
+    if (user == null) return;
+    final postId = _safeString(widget.snap["postId"]);
+    final ownerUid = _safeString(widget.snap["uid"]);
+    if (postId.isEmpty || ownerUid.isEmpty) return;
+    if (user.uid == ownerUid) return;
+    _hasRecordedView = true;
+    await FirestoreMethods().recordPostView(
+      postId: postId,
+      viewerUid: user.uid,
+      viewerGender: user.gender,
+    );
   }
 
   @override
@@ -75,33 +555,39 @@ class _PostCardState extends State<PostCardProfile> {
                   ),
                 ),
               ),
-              Padding(
-                padding: const EdgeInsets.only(left: 12.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    MyText(
-                      text: widget.snap["username"],
-                      textClr: primaryColor,
-                      textSize: 16,
-                      textWeight: FontWeight.bold,
-                    ),
-                    if (location.isNotEmpty) ...[
-                      const SizedBox(height: 2),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 12.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
                       Text(
-                        location,
+                        widget.snap["username"],
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                          color: secondaryColor,
-                          fontSize: 12,
+                          color: primaryColor,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
+                      if (location.isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          location,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: secondaryColor,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
                     ],
-                  ],
+                  ),
                 ),
               ),
-              const Spacer(),
+              const SizedBox(width: 4),
               IconButton(
                 onPressed: () {
                   showDialog(
@@ -249,6 +735,7 @@ class _PostCardState extends State<PostCardProfile> {
                     context: context,
                     isScrollControlled: true,
                     useSafeArea: true,
+                    backgroundColor: Colors.transparent,
                     builder: (context) => SharePostSheet(
                       postId: _safeString(widget.snap["postId"]),
                       postUrl: _safeString(widget.snap["postUrl"]),
@@ -272,58 +759,58 @@ class _PostCardState extends State<PostCardProfile> {
             ],
           ),
 
-          if (isOwner)
+          if (isOwner) ...[
+            const Divider(
+              color: secondaryColor,
+              height: 16,
+              thickness: 0.3,
+            ),
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6),
-              child: Row(
-                children: [
-                  TextButton(
-                    onPressed: () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text(
-                            "Insights will be available in a future update.",
-                          ),
-                          backgroundColor: secondaryColor,
-                          behavior: SnackBarBehavior.floating,
-                          duration: Duration(seconds: 2),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+              child: SizedBox(
+                height: 36,
+                child: Row(
+                  children: [
+                    TextButton(
+                      onPressed: () {
+                        _showInsightsSheet();
+                      },
+                      style: TextButton.styleFrom(
+                        padding: EdgeInsets.zero,
+                        minimumSize: const Size(0, 36),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      child: const Text(
+                        "View insights",
+                        style: TextStyle(
+                          color: primaryColor,
+                          fontWeight: FontWeight.w600,
                         ),
-                      );
-                    },
-                    child: const Text(
-                      "View insights",
-                      style: TextStyle(
-                        color: primaryColor,
-                        fontWeight: FontWeight.w600,
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  TextButton.icon(
-                    onPressed: () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text(
-                            "Boost feature will be available in a future update!",
-                          ),
-                          backgroundColor: secondaryColor,
-                          behavior: SnackBarBehavior.floating,
-                          duration: Duration(seconds: 2),
+                    const Spacer(),
+                    ElevatedButton(
+                      onPressed: _showBoostSheet,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: blueColor,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 18,
+                          vertical: 6,
                         ),
-                      );
-                    },
-                    icon: const Icon(Icons.bolt, color: Colors.amber, size: 20),
-                    label: const Text(
-                      "Boost",
-                      style: TextStyle(
-                        color: Colors.amber,
-                        fontWeight: FontWeight.bold,
+                        minimumSize: const Size(0, 32),
+                        shape: const StadiumBorder(),
+                      ),
+                      child: const Text(
+                        "Boost post",
+                        style: TextStyle(fontWeight: FontWeight.w600),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
+          ],
 
           // --- CAPTION ---
           Padding(

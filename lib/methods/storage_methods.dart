@@ -8,16 +8,16 @@ class StorageMethods {
   final FirebaseStorage _storage = FirebaseStorage.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
-  // ADDING IMAGE TO FIREBASE STORAGE
-  Future<String> uploadImageToStorage(
+  Future<String> uploadBytesToStorage(
     String childName,
     Uint8List file,
-    bool isPost,
-  ) async {
+    bool isPost, {
+    String? contentType,
+  }) async {
     if (file.isEmpty) {
       throw FirebaseException(
         plugin: "firebase_storage",
-        message: "Selected image is empty.",
+        message: "Selected file is empty.",
       );
     }
 
@@ -29,30 +29,47 @@ class StorageMethods {
       );
     }
 
-    Reference ref = _storage
-        .ref()
-        .child(childName)
-        .child(user.uid);
+    Reference ref = _storage.ref().child(childName).child(user.uid);
 
     if (isPost) {
       String id = const Uuid().v1();
       ref = ref.child(id);
     }
 
-    try {
-      UploadTask uploadTask = ref.putData(file);
-      TaskSnapshot snap = await uploadTask;
-      String downloadURL = await snap.ref.getDownloadURL();
-      return downloadURL;
-    } on FirebaseException catch (e) {
-      // Retry once for intermittent task cancellations from platform/network.
-      if (e.code == "canceled") {
-        UploadTask retryTask = ref.putData(file);
-        TaskSnapshot retrySnap = await retryTask;
-        String downloadURL = await retrySnap.ref.getDownloadURL();
+    for (var attempt = 0; attempt < 3; attempt++) {
+      try {
+        final metadata =
+            contentType == null ? null : SettableMetadata(contentType: contentType);
+        UploadTask uploadTask = ref.putData(file, metadata);
+        TaskSnapshot snap = await uploadTask;
+        String downloadURL = await snap.ref.getDownloadURL();
         return downloadURL;
+      } on FirebaseException catch (e) {
+        final isCanceled = e.code == "canceled" || e.code == "cancelled";
+        if (attempt < 2 && isCanceled) {
+          await Future.delayed(const Duration(milliseconds: 300));
+          continue;
+        }
+        rethrow;
       }
-      rethrow;
     }
+    throw FirebaseException(
+      plugin: "firebase_storage",
+      message: "Upload failed after retries.",
+    );
+  }
+
+  // ADDING IMAGE TO FIREBASE STORAGE
+  Future<String> uploadImageToStorage(
+    String childName,
+    Uint8List file,
+    bool isPost,
+  ) async {
+    return uploadBytesToStorage(
+      childName,
+      file,
+      isPost,
+      contentType: "image/jpeg",
+    );
   }
 }

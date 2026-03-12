@@ -128,6 +128,11 @@ class _SharePostSheetState extends State<SharePostSheet> {
     if (currentUid == null) {
       return const SizedBox.shrink();
     }
+    const sheetBg = Colors.white;
+    const sheetText = Colors.black87;
+    const sheetHint = Colors.black45;
+    const sheetBorder = Colors.black12;
+    const searchFill = Color(0xFFF2F2F2);
 
     return DraggableScrollableSheet(
       initialChildSize: 0.6,
@@ -142,7 +147,7 @@ class _SharePostSheetState extends State<SharePostSheet> {
           child: Container(
             padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
             decoration: const BoxDecoration(
-              color: mobileBackgroundColor,
+              color: sheetBg,
               borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
             ),
             child: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
@@ -162,7 +167,7 @@ class _SharePostSheetState extends State<SharePostSheet> {
                   return const Center(
                     child: Text(
                       "No followers to share with.",
-                      style: TextStyle(color: primaryColor),
+                      style: TextStyle(color: sheetText),
                     ),
                   );
                 }
@@ -179,26 +184,36 @@ class _SharePostSheetState extends State<SharePostSheet> {
 
                     return Column(
                       children: [
+                        Center(
+                          child: Container(
+                            width: 36,
+                            height: 4,
+                            decoration: BoxDecoration(
+                              color: sheetBorder,
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
                         TextField(
                           focusNode: _searchFocus,
                           controller: _searchController,
                           autofocus: true,
                           textInputAction: TextInputAction.search,
                           keyboardType: TextInputType.text,
-                          style: const TextStyle(color: primaryColor),
+                          style: const TextStyle(color: sheetText),
                           decoration: InputDecoration(
                             hintText: "Search",
-                            hintStyle: const TextStyle(color: secondaryColor),
+                            hintStyle: const TextStyle(color: sheetHint),
                             prefixIcon: const Icon(
                               Icons.search,
-                              color: secondaryColor,
+                              color: sheetHint,
                             ),
                             filled: true,
-                            fillColor: mobileBackgroundColor,
+                            fillColor: searchFill,
                             enabledBorder: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(12),
-                              borderSide:
-                                  const BorderSide(color: secondaryColor),
+                              borderSide: const BorderSide(color: sheetBorder),
                             ),
                             focusedBorder: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(12),
@@ -266,7 +281,7 @@ class _SharePostSheetState extends State<SharePostSheet> {
                                           maxLines: 1,
                                           overflow: TextOverflow.ellipsis,
                                           style: const TextStyle(
-                                            color: primaryColor,
+                                            color: sheetText,
                                             fontSize: 12,
                                           ),
                                         ),

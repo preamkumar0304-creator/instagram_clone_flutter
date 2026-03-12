@@ -35,6 +35,7 @@ class AuthMethods {
       "username": uniqueUsername,
       "bio": "",
       "photoUrl": "https://via.placeholder.com/150",
+      "gender": "unspecified",
       "followers": [],
       "following": [],
       "savedPosts": [],
@@ -93,7 +94,8 @@ class AuthMethods {
     required String password,
     required String username,
     required String bio,
-    required Uint8List file,
+    required Uint8List? file,
+    required String gender,
   }) async {
     String message = "";
 
@@ -127,11 +129,13 @@ class AuthMethods {
       // 🔹 Upload profile image
       String photoUrl = "";
       try {
-        photoUrl = await StorageMethods().uploadImageToStorage(
-          "profilePics",
-          file,
-          false,
-        );
+        if (file != null && file.isNotEmpty) {
+          photoUrl = await StorageMethods().uploadImageToStorage(
+            "profilePics",
+            file,
+            false,
+          );
+        }
       } on FirebaseException catch (e) {
         // If Storage rules/App Check block upload, continue with placeholder
         if (e.code == "unauthorized" || e.code == "unauthenticated") {
@@ -152,6 +156,7 @@ class AuthMethods {
         email: email,
         bio: bio,
         photoUrl: photoUrl,
+        gender: gender.isEmpty ? "unspecified" : gender,
         followers: [],
         following: [],
         savedPosts: [],

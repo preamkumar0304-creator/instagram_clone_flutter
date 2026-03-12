@@ -22,6 +22,7 @@ class PostCard extends StatefulWidget {
 class _PostCardState extends State<PostCard> {
   bool isLikeAnimating = false;
   int commentL = 0;
+  bool _hasRecordedView = false;
 
   String _safeString(dynamic value) {
     if (value == null) return "";
@@ -40,6 +41,12 @@ class _PostCardState extends State<PostCard> {
     getComments();
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _recordViewIfNeeded();
+  }
+
   getComments() async {
     QuerySnapshot snap =
         await FirebaseFirestore.instance
@@ -54,8 +61,32 @@ class _PostCardState extends State<PostCard> {
   void _openProfile() {
     final uid = _safeString(widget.snap["uid"]);
     if (uid.isEmpty) return;
+    final viewer = Provider.of<UserProvider>(context, listen: false).getUser;
+    final postId = _safeString(widget.snap["postId"]);
+    if (viewer != null && viewer.uid != uid && postId.isNotEmpty) {
+      FirestoreMethods().recordProfileVisit(
+        postId: postId,
+        viewerUid: viewer.uid,
+      );
+    }
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => ProfileScreen(uid: uid)),
+    );
+  }
+
+  Future<void> _recordViewIfNeeded() async {
+    if (_hasRecordedView) return;
+    final user = Provider.of<UserProvider>(context).getUser;
+    if (user == null) return;
+    final postId = _safeString(widget.snap["postId"]);
+    final ownerUid = _safeString(widget.snap["uid"]);
+    if (postId.isEmpty || ownerUid.isEmpty) return;
+    if (user.uid == ownerUid) return;
+    _hasRecordedView = true;
+    await FirestoreMethods().recordPostView(
+      postId: postId,
+      viewerUid: user.uid,
+      viewerGender: user.gender,
     );
   }
 
@@ -96,6 +127,7 @@ class _PostCardState extends State<PostCard> {
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
+      backgroundColor: Colors.transparent,
       builder: (context) {
         return SharePostSheet(
           postId: _safeString(widget.snap["postId"]),
@@ -145,36 +177,42 @@ class _PostCardState extends State<PostCard> {
                   ),
                 ),
               ),
-              Padding(
-                padding: const EdgeInsets.only(left: 12.0),
-                child: GestureDetector(
-                  onTap: _openProfile,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      MyText(
-                        text: username,
-                        textClr: primaryColor,
-                        textSize: 16,
-                        textWeight: FontWeight.bold,
-                      ),
-                      if (location.isNotEmpty) ...[
-                        const SizedBox(height: 2),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 12.0),
+                  child: GestureDetector(
+                    onTap: _openProfile,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
                         Text(
-                          location,
+                          username,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
-                            color: secondaryColor,
-                            fontSize: 12,
+                            color: primaryColor,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
                           ),
                         ),
+                        if (location.isNotEmpty) ...[
+                          const SizedBox(height: 2),
+                          Text(
+                            location,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: secondaryColor,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
                       ],
-                    ],
+                    ),
                   ),
                 ),
               ),
-              Spacer(),
+              const SizedBox(width: 4),
               IconButton(
                 onPressed: () {
                   showDialog(

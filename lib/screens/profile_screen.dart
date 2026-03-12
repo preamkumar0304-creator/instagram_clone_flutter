@@ -12,6 +12,8 @@ import 'package:instagram_clone_flutter_firebase/screens/follow_list_screen.dart
 import 'package:instagram_clone_flutter_firebase/screens/post_profile.dart';
 import 'package:instagram_clone_flutter_firebase/screens/profile_photo_view.dart';
 import 'package:instagram_clone_flutter_firebase/screens/saved_screen.dart';
+import 'package:instagram_clone_flutter_firebase/screens/story_viewer_screen.dart';
+import 'package:instagram_clone_flutter_firebase/screens/add_post_screen.dart';
 import 'package:instagram_clone_flutter_firebase/utils/colors.dart';
 import 'package:instagram_clone_flutter_firebase/utils/utils.dart';
 import 'package:instagram_clone_flutter_firebase/widgets/elevated_button.dart';
@@ -37,6 +39,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool isLoading = true;
   bool isUploadingPhoto = false;
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _userSub;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _storySub;
+  bool _hasActiveStory = false;
 
   String _safeString(dynamic value) {
     if (value == null) return "";
@@ -82,11 +86,35 @@ class _ProfileScreenState extends State<ProfileScreen> {
       });
     });
     getData();
+    _storySub = FirebaseFirestore.instance
+        .collection("stories")
+        .where("uid", isEqualTo: widget.uid)
+        .snapshots()
+        .listen((snap) {
+      if (!mounted) return;
+      final now = DateTime.now();
+      final hasStory = snap.docs.any((doc) {
+        final data = doc.data();
+        final expiresAt = data["expiresAt"];
+        DateTime? expires;
+        if (expiresAt is Timestamp) {
+          expires = expiresAt.toDate();
+        } else if (expiresAt is DateTime) {
+          expires = expiresAt;
+        }
+        if (expires == null) return true;
+        return expires.isAfter(now);
+      });
+      setState(() {
+        _hasActiveStory = hasStory;
+      });
+    });
   }
 
   @override
   void dispose() {
     _userSub?.cancel();
+    _storySub?.cancel();
     super.dispose();
   }
 
@@ -289,6 +317,30 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  void _openStoryViewer() {
+    final viewerUid = FirebaseAuth.instance.currentUser?.uid ?? "";
+    if (viewerUid.isEmpty) return;
+    Navigator.of(context).push(
+      PageRouteBuilder(
+        transitionDuration: Duration.zero,
+        reverseTransitionDuration: Duration.zero,
+        opaque: true,
+        barrierColor: Colors.black,
+        pageBuilder:
+            (_, __, ___) => StoryViewerScreen(
+              ownerUid: widget.uid,
+              viewerUid: viewerUid,
+            ),
+      ),
+    );
+  }
+
+  void _openCreateFromProfile() {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const AddPostScreen()),
+    );
+  }
+
   Future<void> _openHighlights() async {
     showModalBottomSheet(
       context: context,
@@ -329,7 +381,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 children: [
                   if (stories.isNotEmpty) ...[
                     const Text(
-                      "Stories",
+                      "Highlights",
                       style: TextStyle(
                         color: primaryColor,
                         fontWeight: FontWeight.bold,
@@ -343,7 +395,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           color: primaryColor,
                         ),
                         title: Text(
-                          (s["title"] ?? "Story").toString(),
+                          (s["title"] ?? "Highlight").toString(),
                           style: const TextStyle(color: primaryColor),
                         ),
                       ),
@@ -384,8 +436,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<Map<String, List<Map<String, dynamic>>>> _loadHighlights() async {
     final storiesSnap =
         await FirebaseFirestore.instance
-            .collection("stories")
+            .collection("highlights")
             .where("uid", isEqualTo: widget.uid)
+            .orderBy("updatedAt", descending: true)
             .get();
     final reelsSnap =
         await FirebaseFirestore.instance
@@ -453,7 +506,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               if (hasStories)
                 _highlightItem(
                   icon: Icons.auto_awesome,
-                  label: "Stories",
+                  label: "Highlights",
                   onTap: _openHighlights,
                 ),
               if (hasReels)
@@ -504,17 +557,38 @@ class _ProfileScreenState extends State<ProfileScreen> {
               Row(
                 children: [
                   GestureDetector(
-                    onTap: _showProfilePhotoActions,
+                    behavior: HitTestBehavior.opaque,
+                    onTap:
+                        _hasActiveStory
+                            ? _openStoryViewer
+                            : _showProfilePhotoActions,
                     child: Stack(
                       alignment: Alignment.center,
                       children: [
                         Container(
+                          padding: const EdgeInsets.all(2),
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            border: Border.all(
-                              color: secondaryColor,
-                              width: 1,
-                            ),
+                            gradient:
+                                _hasActiveStory
+                                    ? const LinearGradient(
+                                      colors: [
+                                        Color(0xFFF58529),
+                                        Color(0xFFDD2A7B),
+                                        Color(0xFF8134AF),
+                                        Color(0xFF515BD4),
+                                      ],
+                                      begin: Alignment.topLeft,
+                                      end: Alignment.bottomRight,
+                                    )
+                                    : null,
+                            border:
+                                _hasActiveStory
+                                    ? null
+                                    : Border.all(
+                                      color: secondaryColor,
+                                      width: 1,
+                                    ),
                           ),
                           child: CircleAvatar(
                             radius: 40,
@@ -534,6 +608,31 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 : null,
                           ),
                         ),
+                        if (isOwner)
+                          Positioned(
+                            right: 4,
+                            bottom: 4,
+                            child: GestureDetector(
+                              onTap: _openCreateFromProfile,
+                              child: Container(
+                                width: 20,
+                                height: 20,
+                                decoration: BoxDecoration(
+                                  color: blueColor,
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: mobileBackgroundColor,
+                                    width: 2,
+                                  ),
+                                ),
+                                child: const Icon(
+                                  Icons.add,
+                                  size: 14,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ),
+                          ),
                         if (isUploadingPhoto)
                           const SizedBox(
                             width: 28,
