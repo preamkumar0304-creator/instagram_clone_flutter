@@ -2,6 +2,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:instagram_clone_flutter_firebase/methods/firestore_methods.dart';
 import 'package:instagram_clone_flutter_firebase/providers/user_provider.dart';
+import 'package:instagram_clone_flutter_firebase/screens/image_viewer_screen.dart';
+import 'package:instagram_clone_flutter_firebase/screens/boost_review_screen.dart';
 import 'package:instagram_clone_flutter_firebase/utils/colors.dart';
 import 'package:instagram_clone_flutter_firebase/widgets/comments_bottom_sheet.dart';
 import 'package:instagram_clone_flutter_firebase/widgets/like_animation.dart';
@@ -60,9 +62,8 @@ class _PostCardState extends State<PostCardProfile> {
       fontWeight: isHeader ? FontWeight.w700 : FontWeight.w500,
     );
     return TableRow(
-      decoration: isHeader
-          ? const BoxDecoration(color: Color(0xFF1C1F24))
-          : null,
+      decoration:
+          isHeader ? const BoxDecoration(color: Color(0xFFF2F2F2)) : null,
       children: [
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -88,25 +89,29 @@ class _PostCardState extends State<PostCardProfile> {
         "title": "Free for 30 days",
         "subtitle": "Trial boost for new posts",
         "days": 30,
-        "interval": 6,
+        "interval": 4,
+        "maxInsertions": 8,
       },
       {
         "title": "Rs 199 - 3 days",
         "subtitle": "Reach ~1.5k-3k people",
         "days": 3,
         "interval": 4,
+        "maxInsertions": 12,
       },
       {
         "title": "Rs 399 - 7 days",
         "subtitle": "Reach ~4k-7k people",
         "days": 7,
         "interval": 5,
+        "maxInsertions": 16,
       },
       {
         "title": "Rs 799 - 14 days",
         "subtitle": "Reach ~10k-18k people",
         "days": 14,
         "interval": 6,
+        "maxInsertions": 20,
       },
     ];
     showModalBottomSheet(
@@ -187,25 +192,22 @@ class _PostCardState extends State<PostCardProfile> {
                           final selected = options[selectedIndex];
                           final days = selected["days"] as int? ?? 7;
                           final interval = selected["interval"] as int? ?? 5;
+                          final maxInsertions =
+                              selected["maxInsertions"] as int? ?? 8;
                           final postId = _safeString(widget.snap["postId"]);
-                          if (postId.isNotEmpty) {
-                            FirebaseFirestore.instance
-                                .collection("posts")
-                                .doc(postId)
-                                .update({
-                                  "isBoosted": true,
-                                  "boostInterval": interval,
-                                  "boostedAt": DateTime.now(),
-                                  "boostExpiresAt":
-                                      DateTime.now().add(Duration(days: days)),
-                                });
-                          }
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text("Boost enabled."),
-                              backgroundColor: secondaryColor,
-                              behavior: SnackBarBehavior.floating,
-                              duration: Duration(seconds: 2),
+                          if (postId.isEmpty) return;
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder:
+                                  (_) => BoostReviewScreen(
+                                    postId: postId,
+                                    postUrl: _safeString(
+                                      widget.snap["postUrl"],
+                                    ),
+                                    days: days,
+                                    interval: interval,
+                                    maxInsertions: maxInsertions,
+                                  ),
                             ),
                           );
                         },
@@ -331,29 +333,33 @@ class _PostCardState extends State<PostCardProfile> {
                     const SizedBox(height: 12),
                     Container(
                       decoration: BoxDecoration(
+                        color: Colors.white,
                         border: Border.all(color: secondaryColor),
                         borderRadius: BorderRadius.circular(12),
                       ),
-                      child: Table(
-                        columnWidths: const {
-                          0: FlexColumnWidth(2),
-                          1: FlexColumnWidth(1),
-                        },
-                        defaultVerticalAlignment:
-                            TableCellVerticalAlignment.middle,
-                        children: [
-                          _insightsRow(
-                            label: "Metric",
-                            value: "Value",
-                            isHeader: true,
-                          ),
-                          ...metrics.map(
-                            (metric) => _insightsRow(
-                              label: metric["label"] as String,
-                              value: _formatCount(metric["value"] as int),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: Table(
+                          columnWidths: const {
+                            0: FlexColumnWidth(2),
+                            1: FlexColumnWidth(1),
+                          },
+                          defaultVerticalAlignment:
+                              TableCellVerticalAlignment.middle,
+                          children: [
+                            _insightsRow(
+                              label: "Metric",
+                              value: "Value",
+                              isHeader: true,
                             ),
-                          ),
-                        ],
+                            ...metrics.map(
+                              (metric) => _insightsRow(
+                                label: metric["label"] as String,
+                                value: _formatCount(metric["value"] as int),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                     const SizedBox(height: 16),
@@ -371,113 +377,118 @@ class _PostCardState extends State<PostCardProfile> {
                     const SizedBox(height: 8),
                     Container(
                       decoration: BoxDecoration(
+                        color: Colors.white,
                         border: Border.all(color: secondaryColor),
                         borderRadius: BorderRadius.circular(12),
                       ),
-                      child: Table(
-                        columnWidths: const {
-                          0: FlexColumnWidth(1),
-                          1: FlexColumnWidth(1),
-                          2: FlexColumnWidth(1),
-                        },
-                        defaultVerticalAlignment:
-                            TableCellVerticalAlignment.middle,
-                        children: [
-                          TableRow(
-                            decoration:
-                                const BoxDecoration(color: Color(0xFF1C1F24)),
-                            children: const [
-                              Padding(
-                                padding: EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 8,
-                                ),
-                                child: Text(
-                                  "Male",
-                                  style: TextStyle(
-                                    color: primaryColor,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w700,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: Table(
+                          columnWidths: const {
+                            0: FlexColumnWidth(1),
+                            1: FlexColumnWidth(1),
+                            2: FlexColumnWidth(1),
+                          },
+                          defaultVerticalAlignment:
+                              TableCellVerticalAlignment.middle,
+                          children: [
+                            TableRow(
+                              decoration: const BoxDecoration(
+                                color: Color(0xFFF2F2F2),
+                              ),
+                              children: const [
+                                Padding(
+                                  padding: EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 8,
+                                  ),
+                                  child: Text(
+                                    "Male",
+                                    style: TextStyle(
+                                      color: primaryColor,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w700,
+                                    ),
                                   ),
                                 ),
-                              ),
-                              Padding(
-                                padding: EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 8,
-                                ),
-                                child: Text(
-                                  "Female",
-                                  style: TextStyle(
-                                    color: primaryColor,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w700,
+                                Padding(
+                                  padding: EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 8,
+                                  ),
+                                  child: Text(
+                                    "Female",
+                                    style: TextStyle(
+                                      color: primaryColor,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w700,
+                                    ),
                                   ),
                                 ),
-                              ),
-                              Padding(
-                                padding: EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 8,
-                                ),
-                                child: Text(
-                                  "Other",
-                                  style: TextStyle(
-                                    color: primaryColor,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w700,
+                                Padding(
+                                  padding: EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 8,
+                                  ),
+                                  child: Text(
+                                    "Other",
+                                    style: TextStyle(
+                                      color: primaryColor,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w700,
+                                    ),
                                   ),
                                 ),
-                              ),
-                            ],
-                          ),
-                          TableRow(
-                            children: [
-                              Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 8,
-                                ),
-                                child: Text(
-                                  _formatCount(male),
-                                  style: const TextStyle(
-                                    color: primaryColor,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
+                              ],
+                            ),
+                            TableRow(
+                              children: [
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 8,
+                                  ),
+                                  child: Text(
+                                    _formatCount(male),
+                                    style: const TextStyle(
+                                      color: primaryColor,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                    ),
                                   ),
                                 ),
-                              ),
-                              Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 8,
-                                ),
-                                child: Text(
-                                  _formatCount(female),
-                                  style: const TextStyle(
-                                    color: primaryColor,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 8,
+                                  ),
+                                  child: Text(
+                                    _formatCount(female),
+                                    style: const TextStyle(
+                                      color: primaryColor,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                    ),
                                   ),
                                 ),
-                              ),
-                              Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 8,
-                                ),
-                                child: Text(
-                                  _formatCount(other),
-                                  style: const TextStyle(
-                                    color: primaryColor,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 8,
+                                  ),
+                                  child: Text(
+                                    _formatCount(other),
+                                    style: const TextStyle(
+                                      color: primaryColor,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                    ),
                                   ),
                                 ),
-                              ),
-                            ],
-                          ),
-                        ],
+                              ],
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                     const SizedBox(height: 12),
@@ -529,22 +540,41 @@ class _PostCardState extends State<PostCardProfile> {
     );
   }
 
+  Future<void> _toggleFollow(String ownerUid) async {
+    final user = Provider.of<UserProvider>(context, listen: false).getUser;
+    if (user == null || ownerUid.isEmpty || user.uid == ownerUid) return;
+    await FirestoreMethods().followUser(uid: user.uid, followId: ownerUid);
+    await Provider.of<UserProvider>(context, listen: false).refreshUser();
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  void _openImageViewer(String url) {
+    if (url.isEmpty) return;
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => ImageViewerScreen(imageUrl: url)),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final user = Provider.of<UserProvider>(context).getUser;
     final bool isOwner = user != null && user.uid == widget.snap["uid"];
+    final ownerUid = _safeString(widget.snap["uid"]);
+    final isFollowing = user?.following.contains(ownerUid) ?? false;
     final shareCount = _safeInt(widget.snap["shareCount"]);
     final location = _safeString(widget.snap["location"]);
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 5),
+      padding: const EdgeInsets.symmetric(vertical: 12),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Row(
-            children: [
-              Padding(
-                padding: const EdgeInsets.only(left: 10),
-                child: Container(
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Row(
+              children: [
+                Container(
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     border: Border.all(color: secondaryColor, width: 1),
@@ -552,44 +582,74 @@ class _PostCardState extends State<PostCardProfile> {
                   child: CircleAvatar(
                     radius: 16,
                     backgroundImage: NetworkImage(widget.snap["photoUrl"]),
+                    backgroundColor: Colors.grey.shade300,
+                    child: (widget.snap["photoUrl"] ?? "").toString().isEmpty
+                        ? const Icon(Icons.person, color: Colors.black)
+                        : null,
                   ),
                 ),
-              ),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.only(left: 12.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        widget.snap["username"],
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: primaryColor,
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      if (location.isNotEmpty) ...[
-                        const SizedBox(height: 2),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(right: 6.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
                         Text(
-                          location,
+                          widget.snap["username"],
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
-                            color: secondaryColor,
-                            fontSize: 12,
+                            color: primaryColor,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
                           ),
                         ),
+                        if (location.isNotEmpty) ...[
+                          const SizedBox(height: 3),
+                          Text(
+                            location,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: secondaryColor,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
                       ],
-                    ],
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(width: 4),
-              IconButton(
-                onPressed: () {
+                if (!isOwner)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 6),
+                    child: TextButton(
+                      onPressed: () => _toggleFollow(ownerUid),
+                      style: TextButton.styleFrom(
+                        backgroundColor:
+                            isFollowing
+                                ? Colors.grey.shade200
+                                : Colors.black,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 4,
+                        ),
+                        minimumSize: const Size(0, 28),
+                        shape: const StadiumBorder(),
+                      ),
+                      child: Text(
+                        isFollowing ? "Following" : "Follow",
+                        style: TextStyle(
+                          color: isFollowing ? Colors.black : Colors.white,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                  ),
+                IconButton(
+                  onPressed: () {
                   showDialog(
                     context: context,
                     builder: (context) {
@@ -612,10 +672,12 @@ class _PostCardState extends State<PostCardProfile> {
                     },
                   );
                 },
-                icon: const Icon(Icons.more_vert),
-              ),
-            ],
+                  icon: const Icon(Icons.more_vert),
+                ),
+              ],
+            ),
           ),
+          const SizedBox(height: 8),
 
           // --- POST IMAGE ---
           GestureDetector(
@@ -629,6 +691,7 @@ class _PostCardState extends State<PostCardProfile> {
                 isLikeAnimating = true;
               });
             },
+            onTap: () => _openImageViewer(_safeString(widget.snap["postUrl"])),
             child: Stack(
               alignment: Alignment.center,
               children: [
@@ -662,109 +725,10 @@ class _PostCardState extends State<PostCardProfile> {
             ),
           ),
 
-                    // --- ACTION ROW ---
-          Row(
-            children: [
-              GestureDetector(
-                onTap: () async {
-                  await FirestoreMethods().likePost(
-                    widget.snap["postId"],
-                    user.uid,
-                    widget.snap["likes"],
-                  );
-                },
-                child: Padding(
-                  padding: const EdgeInsets.only(left: 10, right: 3),
-                  child: LikeAnimation(
-                    isAnimating: widget.snap["likes"].contains(user!.uid),
-                    smallLike: true,
-                    child: widget.snap["likes"].contains(user.uid)
-                        ? const Icon(Icons.favorite, color: errorColor, size: 28)
-                        : const Icon(Icons.favorite_border, color: primaryColor),
-                  ),
-                ),
-              ),
-              MyText(
-                text: "${widget.snap["likes"].length}",
-                textClr: primaryColor,
-                textSize: 12,
-              ),
-              GestureDetector(
-                onTap: () {
-                  showModalBottomSheet(
-                    context: context,
-                    isScrollControlled: true,
-                    useSafeArea: true,
-                    builder: (context) => StreamBuilder(
-                      stream: FirebaseFirestore.instance
-                          .collection("posts")
-                          .doc(widget.snap["postId"])
-                          .collection("comments")
-                          .orderBy("commentDate", descending: true)
-                          .snapshots(),
-                      builder: (
-                        context,
-                        AsyncSnapshot<QuerySnapshot<Map<String, dynamic>>> snapshot,
-                      ) {
-                        if (snapshot.connectionState == ConnectionState.waiting) {
-                          return const Center(
-                            child: CircularProgressIndicator(color: primaryColor),
-                          );
-                        }
-                        return CommentsBottomSheet(
-                          snap: widget.snap,
-                          snapshot: snapshot,
-                        );
-                      },
-                    ),
-                  );
-                },
-                child: const Padding(
-                  padding: EdgeInsets.only(left: 15, right: 3),
-                  child: Icon(Icons.messenger_outline, color: primaryColor, size: 28),
-                ),
-              ),
-              MyText(
-                text: commentL.toString(),
-                textClr: primaryColor,
-                textSize: 12,
-              ),
-              GestureDetector(
-                onTap: () {
-                  showModalBottomSheet(
-                    context: context,
-                    isScrollControlled: true,
-                    useSafeArea: true,
-                    backgroundColor: Colors.transparent,
-                    builder: (context) => SharePostSheet(
-                      postId: _safeString(widget.snap["postId"]),
-                      postUrl: _safeString(widget.snap["postUrl"]),
-                      postOwnerUid: _safeString(widget.snap["uid"]),
-                      postOwnerUsername: _safeString(widget.snap["username"]),
-                      postOwnerPhotoUrl: _safeString(widget.snap["photoUrl"]),
-                    ),
-                  );
-                },
-                child: const Padding(
-                  padding: EdgeInsets.only(left: 15, right: 4),
-                  child: Icon(Icons.send, color: primaryColor, size: 28),
-                ),
-              ),
-              MyText(
-                text: shareCount.toString(),
-                textClr: primaryColor,
-                textSize: 12,
-              ),
-              const Spacer(),
-            ],
-          ),
+          const SizedBox(height: 6),
 
           if (isOwner) ...[
-            const Divider(
-              color: secondaryColor,
-              height: 16,
-              thickness: 0.3,
-            ),
+            const SizedBox(height: 10),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
               child: SizedBox(
@@ -810,11 +774,150 @@ class _PostCardState extends State<PostCardProfile> {
                 ),
               ),
             ),
+            const SizedBox(height: 10),
           ],
 
-          // --- CAPTION ---
+          // --- ACTION ROW ---
           Padding(
-            padding: const EdgeInsets.only(left: 10.0, bottom: 5),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Row(
+              children: [
+                GestureDetector(
+                  onTap: () async {
+                    await FirestoreMethods().likePost(
+                      widget.snap["postId"],
+                      user.uid,
+                      widget.snap["likes"],
+                    );
+                  },
+                  child: LikeAnimation(
+                    isAnimating: widget.snap["likes"].contains(user!.uid),
+                    smallLike: true,
+                    child:
+                        widget.snap["likes"].contains(user.uid)
+                            ? const Icon(
+                              Icons.favorite,
+                              color: errorColor,
+                              size: 28,
+                            )
+                            : const Icon(
+                              Icons.favorite_border,
+                              color: primaryColor,
+                            ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                MyText(
+                  text: "${widget.snap["likes"].length}",
+                  textClr: primaryColor,
+                  textSize: 12,
+                ),
+                const SizedBox(width: 10),
+                Container(
+                  width: 1,
+                  height: 18,
+                  color: secondaryColor.withOpacity(0.3),
+                ),
+                const SizedBox(width: 10),
+                GestureDetector(
+                  onTap: () {
+                    showModalBottomSheet(
+                      context: context,
+                      isScrollControlled: true,
+                      useSafeArea: true,
+                      builder:
+                          (context) => StreamBuilder(
+                            stream:
+                                FirebaseFirestore.instance
+                                    .collection("posts")
+                                    .doc(widget.snap["postId"])
+                                    .collection("comments")
+                                    .orderBy("commentDate", descending: true)
+                                    .snapshots(),
+                            builder: (
+                              context,
+                              AsyncSnapshot<
+                                QuerySnapshot<Map<String, dynamic>>
+                              >
+                              snapshot,
+                            ) {
+                              if (snapshot.connectionState ==
+                                  ConnectionState.waiting) {
+                                return const Center(
+                                  child: CircularProgressIndicator(
+                                    color: primaryColor,
+                                  ),
+                                );
+                              }
+                              return CommentsBottomSheet(
+                                snap: widget.snap,
+                                snapshot: snapshot,
+                              );
+                            },
+                          ),
+                    );
+                  },
+                  child: const Icon(
+                    Icons.messenger_outline,
+                    color: primaryColor,
+                    size: 28,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                MyText(
+                  text: commentL.toString(),
+                  textClr: primaryColor,
+                  textSize: 12,
+                ),
+                const SizedBox(width: 10),
+                Container(
+                  width: 1,
+                  height: 18,
+                  color: secondaryColor.withOpacity(0.3),
+                ),
+                const SizedBox(width: 10),
+                GestureDetector(
+                  onTap: () {
+                    showModalBottomSheet(
+                      context: context,
+                      isScrollControlled: true,
+                      useSafeArea: true,
+                      backgroundColor: Colors.transparent,
+                      builder:
+                          (context) => SharePostSheet(
+                            postId: _safeString(widget.snap["postId"]),
+                            postUrl: _safeString(widget.snap["postUrl"]),
+                            postOwnerUid: _safeString(widget.snap["uid"]),
+                            postOwnerUsername: _safeString(
+                              widget.snap["username"],
+                            ),
+                            postOwnerPhotoUrl: _safeString(
+                              widget.snap["photoUrl"],
+                            ),
+                          ),
+                    );
+                  },
+                  child: const Icon(
+                    Icons.send,
+                    color: primaryColor,
+                    size: 28,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                MyText(
+                  text: shareCount.toString(),
+                  textClr: primaryColor,
+                  textSize: 12,
+                ),
+                const Spacer(),
+              ],
+            ),
+          ),
+
+          // --- CAPTION ---
+          const SizedBox(height: 4),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
             child: Row(
               children: [
                 RichText(
@@ -841,7 +944,7 @@ class _PostCardState extends State<PostCardProfile> {
 
           // --- DATE ---
           Padding(
-            padding: const EdgeInsets.only(left: 10.0),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
             child: Align(
               alignment: Alignment.centerLeft,
               child: MyText(
@@ -853,6 +956,7 @@ class _PostCardState extends State<PostCardProfile> {
               ),
             ),
           ),
+          const SizedBox(height: 6),
         ],
       ),
     );

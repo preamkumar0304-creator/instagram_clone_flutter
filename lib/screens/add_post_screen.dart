@@ -7,12 +7,18 @@ import 'package:instagram_clone_flutter_firebase/methods/firestore_methods.dart'
 import 'package:instagram_clone_flutter_firebase/models/story_media_item.dart';
 import 'package:instagram_clone_flutter_firebase/models/users.dart';
 import 'package:instagram_clone_flutter_firebase/providers/user_provider.dart';
+import 'package:instagram_clone_flutter_firebase/screens/profile_screen.dart';
+import 'package:instagram_clone_flutter_firebase/responsive/mobile_screen_layout.dart';
+import 'package:instagram_clone_flutter_firebase/responsive/responsive_layout_screen.dart';
+import 'package:instagram_clone_flutter_firebase/responsive/web_screen_layout.dart';
 import 'package:instagram_clone_flutter_firebase/screens/story_compose_screen.dart';
 import 'package:instagram_clone_flutter_firebase/utils/colors.dart';
 import 'package:instagram_clone_flutter_firebase/utils/utils.dart';
 import 'package:instagram_clone_flutter_firebase/widgets/text.dart';
 import 'package:instagram_clone_flutter_firebase/widgets/text_button.dart';
 import 'package:provider/provider.dart';
+import 'package:photo_manager/photo_manager.dart';
+import 'package:photo_manager_image_provider/photo_manager_image_provider.dart';
 
 class AddPostScreen extends StatefulWidget {
   final Uint8List? initialFile;
@@ -43,6 +49,112 @@ class _AddPostScreenState extends State<AddPostScreen> {
   String _createType = "post";
   bool _useCurrentLocation = false;
   bool _isFetchingLocation = false;
+  bool _isDiscarding = false;
+  bool _hasGalleryPermission = true;
+  bool _isLoadingAssets = true;
+  List<_AlbumOption> _albumOptions = [];
+  _AlbumOption? _currentAlbum;
+  List<AssetEntity> _assets = [];
+  AssetEntity? _selectedAsset;
+
+  void _goHome() {
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(
+        builder:
+            (_) => const ResponsiveLayout(
+              webScreenLayout: WebScreenLayout(),
+              mobileScreenLayout: MobileScreenLayout(),
+            ),
+      ),
+      (route) => false,
+    );
+  }
+
+  Future<bool> _confirmDiscard() async {
+    if (_isLoading || _isDiscarding) return false;
+    final hasChanges =
+        _file != null ||
+        captionController.text.trim().isNotEmpty ||
+        locationController.text.trim().isNotEmpty;
+    if (!hasChanges) {
+      _goHome();
+      return false;
+    }
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: mobileBackgroundColor,
+          title: const Text(
+            "Discard post?",
+            style: TextStyle(color: primaryColor),
+          ),
+          content: const Text(
+            "If you go back now, your changes will be discarded.",
+            style: TextStyle(color: secondaryColor),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text("Continue", style: TextStyle(color: primaryColor)),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text("Discard", style: TextStyle(color: errorColor)),
+            ),
+          ],
+        );
+      },
+    );
+    if (result == true) {
+      setState(() {
+        _isDiscarding = true;
+        _file = null;
+        _useCurrentLocation = false;
+      });
+      captionController.clear();
+      locationController.clear();
+      await Future.delayed(const Duration(milliseconds: 150));
+      if (mounted) {
+        setState(() {
+          _isDiscarding = false;
+        });
+      }
+    }
+    return false;
+  }
+
+  Future<void> _changePostImage() async {
+    if (_isLoading) return;
+    _createType = "post";
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      backgroundColor: mobileBackgroundColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder:
+          (context) => SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.photo_camera, color: primaryColor),
+                  title: const Text("Take photo"),
+                  onTap: () => Navigator.pop(context, ImageSource.camera),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.photo, color: primaryColor),
+                  title: const Text("Choose from gallery"),
+                  onTap: () => Navigator.pop(context, ImageSource.gallery),
+                ),
+              ],
+            ),
+          ),
+    );
+    if (!mounted || source == null) return;
+    await _pickFromSource(source);
+  }
 
   Future<StoryMediaType?> _selectStoryMediaType() async {
     return showModalBottomSheet<StoryMediaType>(
@@ -140,17 +252,448 @@ class _AddPostScreenState extends State<AddPostScreen> {
     return _showCreateMenu();
   }
 
+  Future<void> _initGallery() async {
+    final permission = await PhotoManager.requestPermissionExtend();
+    if (!permission.isAuth) {
+      if (mounted) {
+        setState(() {
+          _hasGalleryPermission = false;
+          _isLoadingAssets = false;
+        });
+      }
+      return;
+    }
+
+    final allAlbums =
+        await PhotoManager.getAssetPathList(
+          type: RequestType.all,
+          hasAll: true,
+        );
+    final imageAlbums =
+        await PhotoManager.getAssetPathList(
+          type: RequestType.image,
+          hasAll: true,
+        );
+    final videoAlbums =
+        await PhotoManager.getAssetPathList(
+          type: RequestType.video,
+          hasAll: true,
+        );
+
+    final options = <_AlbumOption>[];
+    if (allAlbums.isNotEmpty) {
+      options.add(_AlbumOption(label: "Recents", album: allAlbums.first));
+    }
+    if (imageAlbums.isNotEmpty) {
+      options.add(_AlbumOption(label: "Photos", album: imageAlbums.first));
+    }
+    if (videoAlbums.isNotEmpty) {
+      options.add(_AlbumOption(label: "Videos", album: videoAlbums.first));
+    }
+    if (allAlbums.length > 1) {
+      for (final album in allAlbums.skip(1)) {
+        options.add(_AlbumOption(label: album.name, album: album));
+      }
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _albumOptions = options;
+    });
+
+    if (options.isNotEmpty) {
+      await _setAlbum(options.first);
+    } else {
+      setState(() {
+        _isLoadingAssets = false;
+      });
+    }
+  }
+
+  Future<void> _setAlbum(_AlbumOption option) async {
+    setState(() {
+      _currentAlbum = option;
+      _isLoadingAssets = true;
+    });
+    final assets = await option.album.getAssetListPaged(page: 0, size: 200);
+    if (!mounted) return;
+    setState(() {
+      _assets = assets;
+      _selectedAsset ??= assets.isNotEmpty ? assets.first : null;
+      _isLoadingAssets = false;
+    });
+  }
+
+  Future<void> _openAlbumPicker() async {
+    if (_albumOptions.isEmpty) return;
+    final selected = await showModalBottomSheet<_AlbumOption>(
+      context: context,
+      backgroundColor: mobileBackgroundColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder:
+          (context) => SafeArea(
+            child: ListView.separated(
+              shrinkWrap: true,
+              itemCount: _albumOptions.length,
+              separatorBuilder: (_, __) =>
+                  const Divider(color: secondaryColor, height: 1),
+              itemBuilder: (context, index) {
+                final option = _albumOptions[index];
+                return ListTile(
+                  title: Text(
+                    option.label,
+                    style: const TextStyle(color: primaryColor),
+                  ),
+                  trailing:
+                      option.label == _currentAlbum?.label
+                          ? const Icon(Icons.check, color: blueColor)
+                          : null,
+                  onTap: () => Navigator.pop(context, option),
+                );
+              },
+            ),
+          ),
+    );
+    if (selected != null) {
+      await _setAlbum(selected);
+    }
+  }
+
+  Future<void> _openCameraFromPicker() async {
+    if (_isLoading) return;
+    if (_createType == "reel") {
+      final picker = ImagePicker();
+      final video = await picker.pickVideo(source: ImageSource.camera);
+      if (video == null) return;
+      final user = Provider.of<UserProvider>(context, listen: false).getUser;
+      if (user == null) return;
+      setState(() {
+        _isLoading = true;
+      });
+      String message = "";
+      try {
+        final bytes = await video.readAsBytes();
+        message = await FirestoreMethods().uploadReel(
+          videoBytes: bytes,
+          uid: user.uid,
+          username: user.username,
+          profileUrl: user.photoUrl,
+        );
+      } catch (err) {
+        message = err.toString();
+      } finally {
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+          });
+        }
+      }
+      if (!mounted) return;
+      if (message.toLowerCase().contains("added")) {
+        showSnackBar(
+          context: context,
+          content: "Reel added.",
+          clr: successColor,
+        );
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => ProfileScreen(uid: user.uid)),
+        );
+      } else {
+        showSnackBar(
+          context: context,
+          content: message.isEmpty ? "Unable to upload reel." : message,
+          clr: errorColor,
+        );
+      }
+      return;
+    }
+
+    final bytes = await pickImage(ImageSource.camera);
+    if (bytes == null || (bytes as dynamic).isEmpty) return;
+
+    if (_createType == "story") {
+      final user = Provider.of<UserProvider>(context, listen: false).getUser;
+      if (user == null) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder:
+              (_) => StoryComposeScreen(
+                items: [StoryMediaItem.image(bytes)],
+                user: user,
+              ),
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _file = bytes;
+    });
+  }
+
+  Future<void> _openSystemGalleryFallback() async {
+    if (_isLoading) return;
+    final picker = ImagePicker();
+    if (_createType == "reel") {
+      final video = await picker.pickVideo(source: ImageSource.gallery);
+      if (video == null) return;
+      final user = Provider.of<UserProvider>(context, listen: false).getUser;
+      if (user == null) return;
+      setState(() {
+        _isLoading = true;
+      });
+      String message = "";
+      try {
+        final bytes = await video.readAsBytes();
+        message = await FirestoreMethods().uploadReel(
+          videoBytes: bytes,
+          uid: user.uid,
+          username: user.username,
+          profileUrl: user.photoUrl,
+        );
+      } catch (err) {
+        message = err.toString();
+      } finally {
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+          });
+        }
+      }
+      if (!mounted) return;
+      if (message.toLowerCase().contains("added")) {
+        showSnackBar(
+          context: context,
+          content: "Reel added.",
+          clr: successColor,
+        );
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => ProfileScreen(uid: user.uid)),
+        );
+      } else {
+        showSnackBar(
+          context: context,
+          content: message.isEmpty ? "Unable to upload reel." : message,
+          clr: errorColor,
+        );
+      }
+      return;
+    }
+
+    if (_createType == "story") {
+      final mediaType = await _selectStoryMediaType();
+      if (mediaType == null) return;
+      if (mediaType == StoryMediaType.video) {
+        final video = await picker.pickVideo(
+          source: ImageSource.gallery,
+          maxDuration: const Duration(seconds: 15),
+        );
+        if (video == null) return;
+        final user = Provider.of<UserProvider>(context, listen: false).getUser;
+        if (user == null) return;
+        await Navigator.of(context).push(
+          MaterialPageRoute(
+            builder:
+                (_) => StoryComposeScreen(
+                  items: [StoryMediaItem.video(video.path)],
+                  user: user,
+                ),
+          ),
+        );
+        return;
+      }
+      final image = await picker.pickImage(source: ImageSource.gallery);
+      if (image == null) return;
+      final bytes = await image.readAsBytes();
+      final user = Provider.of<UserProvider>(context, listen: false).getUser;
+      if (user == null || bytes.isEmpty) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder:
+              (_) => StoryComposeScreen(
+                items: [StoryMediaItem.image(bytes)],
+                user: user,
+              ),
+        ),
+      );
+      return;
+    }
+
+    final image = await picker.pickImage(source: ImageSource.gallery);
+    if (image == null) return;
+    final bytes = await image.readAsBytes();
+    if (bytes.isEmpty) return;
+    setState(() {
+      _file = bytes;
+    });
+  }
+
+  Future<void> _handleNextFromPicker() async {
+    if (_selectedAsset == null) {
+      showSnackBar(
+        context: context,
+        content: "Please select a file.",
+        clr: errorColor,
+      );
+      return;
+    }
+
+    if (_createType == "post") {
+      if (_selectedAsset!.type != AssetType.image) {
+        showSnackBar(
+          context: context,
+          content: "Please select a photo for a post.",
+          clr: errorColor,
+        );
+        return;
+      }
+      final bytes = await _selectedAsset!.originBytes;
+      if (bytes == null || bytes.isEmpty) {
+        showSnackBar(
+          context: context,
+          content: "Unable to load image.",
+          clr: errorColor,
+        );
+        return;
+      }
+      setState(() {
+        _file = bytes;
+      });
+      return;
+    }
+
+    if (_createType == "story") {
+      final user = Provider.of<UserProvider>(context, listen: false).getUser;
+      if (user == null) return;
+      if (_selectedAsset!.type == AssetType.video) {
+        final file = await _selectedAsset!.file;
+        if (file == null) return;
+        await Navigator.of(context).push(
+          MaterialPageRoute(
+            builder:
+                (_) => StoryComposeScreen(
+                  items: [StoryMediaItem.video(file.path)],
+                  user: user,
+                ),
+          ),
+        );
+        return;
+      }
+      final bytes = await _selectedAsset!.originBytes;
+      if (bytes == null || bytes.isEmpty) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder:
+              (_) => StoryComposeScreen(
+                items: [StoryMediaItem.image(bytes)],
+                user: user,
+              ),
+        ),
+      );
+      return;
+    }
+
+    if (_createType == "reel") {
+      if (_selectedAsset!.type != AssetType.video) {
+        showSnackBar(
+          context: context,
+          content: "Please select a video for a reel.",
+          clr: errorColor,
+        );
+        return;
+      }
+      final file = await _selectedAsset!.file;
+      if (file == null) return;
+      final user = Provider.of<UserProvider>(context, listen: false).getUser;
+      if (user == null) return;
+      setState(() {
+        _isLoading = true;
+      });
+      String message = "";
+      try {
+        final bytes = await file.readAsBytes();
+        message = await FirestoreMethods().uploadReel(
+          videoBytes: bytes,
+          uid: user.uid,
+          username: user.username,
+          profileUrl: user.photoUrl,
+        );
+      } catch (err) {
+        message = err.toString();
+      } finally {
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+          });
+        }
+      }
+      if (!mounted) return;
+      if (message.toLowerCase().contains("added")) {
+        showSnackBar(
+          context: context,
+          content: "Reel added.",
+          clr: successColor,
+        );
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => ProfileScreen(uid: user.uid)),
+        );
+      } else {
+        showSnackBar(
+          context: context,
+          content: message.isEmpty ? "Unable to upload reel." : message,
+          clr: errorColor,
+        );
+      }
+    }
+  }
+
   Future<void> _pickFromSource(ImageSource source) async {
     if (_createType == "reel") {
       final picker = ImagePicker();
       final video = await picker.pickVideo(source: source);
       if (video == null) return;
+      final user = Provider.of<UserProvider>(context, listen: false).getUser;
+      if (user == null) return;
+      setState(() {
+        _isLoading = true;
+      });
+      String message = "";
+      try {
+        final bytes = await video.readAsBytes();
+        message = await FirestoreMethods().uploadReel(
+          videoBytes: bytes,
+          uid: user.uid,
+          username: user.username,
+          profileUrl: user.photoUrl,
+        );
+      } catch (err) {
+        message = err.toString();
+      } finally {
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+          });
+        }
+      }
       if (!mounted) return;
-      showSnackBar(
-        context: context,
-        content: "Reel video selected (upload coming soon).",
-        clr: successColor,
-      );
+      if (message.toLowerCase().contains("added")) {
+        showSnackBar(
+          context: context,
+          content: "Reel added.",
+          clr: successColor,
+        );
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => ProfileScreen(uid: user.uid)),
+        );
+      } else {
+        showSnackBar(
+          context: context,
+          content: message.isEmpty ? "Unable to upload reel." : message,
+          clr: errorColor,
+        );
+      }
       return;
     }
 
@@ -243,6 +786,12 @@ class _AddPostScreenState extends State<AddPostScreen> {
           );
         }
         clearImage();
+        if (!mounted) return;
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            builder: (_) => ProfileScreen(uid: uid),
+          ),
+        );
       } else {
         setState(() {
           _isLoading = false;
@@ -280,7 +829,7 @@ class _AddPostScreenState extends State<AddPostScreen> {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (_createMenuShown) return;
         _createMenuShown = true;
-        _showCreateMenu();
+        _initGallery();
       });
     }
   }
@@ -412,47 +961,301 @@ class _AddPostScreenState extends State<AddPostScreen> {
     FocusScope.of(context).requestFocus(_locationFocus);
   }
 
+  Widget _buildCreateTypeSelector(Color activeColor) {
+    Widget buildItem(String label, String type) {
+      final isActive = _createType == type;
+      return GestureDetector(
+        onTap: () {
+          setState(() {
+            _createType = type;
+          });
+        },
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: isActive ? activeColor : Colors.white54,
+              fontSize: 14,
+              fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
+              letterSpacing: 1.2,
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.6),
+        borderRadius: BorderRadius.circular(30),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          buildItem("POST", "post"),
+          buildItem("STORY", "story"),
+          buildItem("REEL", "reel"),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPicker() {
+    if (!_hasGalleryPermission) {
+      return Center(
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: _openSystemGalleryFallback,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                "Allow photos permission to continue.",
+                style: TextStyle(color: Colors.white70, fontSize: 14),
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: 160,
+                height: 44,
+                child: ElevatedButton(
+                  onPressed: () {
+                    PhotoManager.openSetting();
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: blueColor,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(24),
+                    ),
+                  ),
+                  child: const Text(
+                    "Open settings",
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+              GestureDetector(
+                onTap: _openSystemGalleryFallback,
+                child: const Text(
+                  "Open gallery",
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (_isLoadingAssets) {
+      return const Center(
+        child: CircularProgressIndicator(color: Colors.white),
+      );
+    }
+
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+          child: Row(
+            children: [
+              GestureDetector(
+                onTap: _openAlbumPicker,
+                child: Row(
+                  children: [
+                    Text(
+                      _currentAlbum?.label ?? "Recents",
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    const Icon(
+                      Icons.keyboard_arrow_down,
+                      color: Colors.white,
+                    ),
+                  ],
+                ),
+              ),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.white12,
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                child: const Text(
+                  "Select",
+                  style: TextStyle(color: Colors.white70),
+                ),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: GridView.builder(
+            padding: EdgeInsets.zero,
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 4,
+              crossAxisSpacing: 1,
+              mainAxisSpacing: 1,
+            ),
+            itemCount: _assets.length + 1,
+            itemBuilder: (context, index) {
+              if (index == 0) {
+                return InkWell(
+                  onTap: _openCameraFromPicker,
+                  child: Container(
+                    color: Colors.black87,
+                    child: const Center(
+                      child: Icon(
+                        Icons.photo_camera,
+                        color: Colors.white,
+                        size: 32,
+                      ),
+                    ),
+                  ),
+                );
+              }
+              final asset = _assets[index - 1];
+              final isSelected = _selectedAsset?.id == asset.id;
+              return GestureDetector(
+                onTap: () {
+                  setState(() {
+                    _selectedAsset = asset;
+                  });
+                },
+                child: Stack(
+                  children: [
+                    Positioned.fill(
+                      child: AssetEntityImage(
+                        asset,
+                        isOriginal: false,
+                        fit: BoxFit.cover,
+                      ),
+                    ),
+                    if (asset.type == AssetType.video)
+                      Positioned(
+                        right: 6,
+                        bottom: 6,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.black54,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Icon(
+                            Icons.play_arrow,
+                            color: Colors.white,
+                            size: 14,
+                          ),
+                        ),
+                      ),
+                    if (isSelected)
+                      Positioned.fill(
+                        child: Container(
+                          decoration: BoxDecoration(
+                            border: Border.all(color: blueColor, width: 2),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 16, top: 10),
+          child: _buildCreateTypeSelector(Colors.white),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     UserModel? user = Provider.of<UserProvider>(context, listen: false).getUser;
-    return GestureDetector(
-      onTap: () {
-        FocusScope.of(context).unfocus();
-      },
-      child: Scaffold(
+    final isPickerMode = _file == null;
+    return WillPopScope(
+      onWillPop: _confirmDiscard,
+      child: GestureDetector(
+        onTap: () {
+          FocusScope.of(context).unfocus();
+        },
+        child: Scaffold(
+        backgroundColor:
+            isPickerMode ? Colors.black : mobileBackgroundColor,
         appBar: AppBar(
-          backgroundColor: mobileBackgroundColor,
+          backgroundColor:
+              isPickerMode ? Colors.black : mobileBackgroundColor,
           automaticallyImplyLeading: false,
-          title: MyText(text: "New post", textClr: primaryColor, textSize: 22),
+          leading: IconButton(
+            icon: Icon(
+              Icons.close,
+              color: isPickerMode ? Colors.white : primaryColor,
+            ),
+            onPressed: () {
+              if (isPickerMode) {
+                _goHome();
+              } else {
+                _confirmDiscard();
+              }
+            },
+          ),
+          title: Text(
+            "New post",
+            style: TextStyle(
+              color: isPickerMode ? Colors.white : primaryColor,
+              fontWeight: FontWeight.w600,
+              fontSize: 20,
+            ),
+          ),
           actions: [
-            _file == null
-                ? SizedBox.shrink()
-                : MyTextButton(
-                  buttonText: "Post",
-                  txtClr: blueColor,
-                  onPressed: () {
-                    postImage(user!.uid, user.username, user.photoUrl);
-                  },
+            if (isPickerMode)
+              TextButton(
+                onPressed:
+                    _selectedAsset == null || _isLoading
+                        ? null
+                        : _handleNextFromPicker,
+                child: Text(
+                  "Next",
+                  style: TextStyle(
+                    color:
+                        _selectedAsset == null
+                            ? Colors.white38
+                            : blueColor,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
+              )
+            else
+              MyTextButton(
+                buttonText: "Post",
+                txtClr: blueColor,
+                onPressed: () {
+                  postImage(user!.uid, user.username, user.photoUrl);
+                },
+              ),
           ],
         ),
         body:
-            _file == null
-                ? Center(
-                  child: IconButton(
-                    style: IconButton.styleFrom(
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                        side: BorderSide(color: blueColor),
-                      ),
-                    ),
-                    color: primaryColor,
-                    iconSize: 28,
-                    tooltip: "Upload an image",
-                    onPressed: () => _selectImage(),
-                    icon: Icon(Icons.upload, color: primaryColor),
-                  ),
-                )
+            isPickerMode
+                ? _buildPicker()
                 : SafeArea(
                   child: LayoutBuilder(
                     builder: (context, constraints) {
@@ -466,41 +1269,55 @@ class _AddPostScreenState extends State<AddPostScreen> {
                           ),
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.center,
                             children: [
                               if (_isLoading)
                                 SizedBox(
                                   width:
-                                      MediaQuery.of(context).size.width * 0.9,
+                                      MediaQuery.of(context).size.width * 0.92,
                                   child: LinearProgressIndicator(
                                     borderRadius: BorderRadius.circular(10),
                                     color: blueColor,
                                   ),
                                 ),
                               Padding(
-                                padding: const EdgeInsets.only(
-                                  top: 20,
-                                  bottom: 10,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 16,
                                 ),
                                 child: InkWell(
-                                  onTap: () => _selectImage(),
-                                  child: Container(
-                                    height: 250,
-                                    width:
-                                        MediaQuery.of(context).size.width * 0.9,
-                                    decoration: BoxDecoration(
-                                      borderRadius: BorderRadius.circular(10),
-                                      border: Border.all(color: secondaryColor),
-                                      image: DecorationImage(
-                                        image: MemoryImage(_file!),
-                                        fit: BoxFit.scaleDown,
-                                        alignment: Alignment.center,
+                                  onTap: _changePostImage,
+                                  child: AspectRatio(
+                                    aspectRatio: 1,
+                                    child: Container(
+                                      decoration: BoxDecoration(
+                                        borderRadius: BorderRadius.circular(12),
+                                        border:
+                                            Border.all(color: secondaryColor),
+                                      ),
+                                      child: ClipRRect(
+                                        borderRadius: BorderRadius.circular(12),
+                                        child: InteractiveViewer(
+                                          panEnabled: true,
+                                          scaleEnabled: true,
+                                          minScale: 1.0,
+                                          maxScale: 4.0,
+                                          boundaryMargin:
+                                              const EdgeInsets.all(80),
+                                          child: Image.memory(
+                                            _file!,
+                                            fit: BoxFit.cover,
+                                            width: double.infinity,
+                                            height: double.infinity,
+                                          ),
+                                        ),
                                       ),
                                     ),
                                   ),
                                 ),
                               ),
-                              SizedBox(
-                                width: MediaQuery.of(context).size.width * 0.8,
+                              Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 16),
                                 child: TextField(
                                   controller: captionController,
                                   maxLines: 4,
@@ -525,8 +1342,8 @@ class _AddPostScreenState extends State<AddPostScreen> {
                                 ),
                               ),
                               const SizedBox(height: 12),
-                              SizedBox(
-                                width: MediaQuery.of(context).size.width * 0.8,
+                              Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 16),
                                 child: Row(
                                   children: [
                                     Expanded(
@@ -587,7 +1404,7 @@ class _AddPostScreenState extends State<AddPostScreen> {
                                 const SizedBox(height: 8),
                                 SizedBox(
                                   width:
-                                      MediaQuery.of(context).size.width * 0.8,
+                                      MediaQuery.of(context).size.width * 0.92,
                                   child: LinearProgressIndicator(
                                     borderRadius: BorderRadius.circular(10),
                                     color: blueColor,
@@ -595,8 +1412,8 @@ class _AddPostScreenState extends State<AddPostScreen> {
                                 ),
                               ],
                               const SizedBox(height: 8),
-                              SizedBox(
-                                width: MediaQuery.of(context).size.width * 0.8,
+                              Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 16),
                                 child: TextField(
                                   controller: locationController,
                                   focusNode: _locationFocus,
@@ -649,8 +1466,16 @@ class _AddPostScreenState extends State<AddPostScreen> {
                       );
                     },
                   ),
-                ),
+        ),
+      ),
       ),
     );
   }
+}
+
+class _AlbumOption {
+  final String label;
+  final AssetPathEntity album;
+
+  const _AlbumOption({required this.label, required this.album});
 }

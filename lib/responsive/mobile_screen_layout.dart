@@ -44,27 +44,47 @@ class _MobileScreenLayoutState extends State<MobileScreenLayout> {
     }
     final items = homeScreenItems(currentUser.uid);
 
-    return Scaffold(
-      bottomNavigationBar: BottomNavigationBar(
-        type: BottomNavigationBarType.fixed,
-        backgroundColor: mobileBackgroundColor,
-        selectedItemColor: primaryColor,
-        unselectedItemColor: secondaryColor,
-        items: [
-          BottomNavigationBarItem(icon: Icon(Icons.home), label: ""),
-          BottomNavigationBarItem(icon: Icon(Icons.search), label: ""),
-          BottomNavigationBarItem(icon: Icon(Icons.add_circle), label: ""),
-          BottomNavigationBarItem(icon: Icon(Icons.favorite), label: ""),
-          BottomNavigationBarItem(icon: Icon(Icons.person), label: ""),
-        ],
-        currentIndex: _page,
-        onTap: navigationTapped,
-      ),
-      body: PageView(
-        controller: pageController,
-        onPageChanged: onPageChanged,
-        physics: NeverScrollableScrollPhysics(),
-        children: items,
+    return WillPopScope(
+      onWillPop: () async {
+        if (_page != 0) {
+          navigationTapped(0);
+          return false;
+        }
+        return true;
+      },
+      child: Scaffold(
+        bottomNavigationBar: SafeArea(
+          top: false,
+          child: SizedBox(
+            height: kBottomNavigationBarHeight + 6,
+            child: BottomNavigationBar(
+              type: BottomNavigationBarType.fixed,
+              backgroundColor: mobileBackgroundColor,
+              selectedItemColor: primaryColor,
+              unselectedItemColor: secondaryColor,
+              iconSize: 28,
+              selectedFontSize: 10,
+              unselectedFontSize: 10,
+              showSelectedLabels: false,
+              showUnselectedLabels: false,
+              items: [
+                BottomNavigationBarItem(icon: Icon(Icons.home), label: ""),
+                BottomNavigationBarItem(icon: Icon(Icons.search), label: ""),
+                BottomNavigationBarItem(icon: Icon(Icons.message), label: ""),
+                BottomNavigationBarItem(icon: Icon(Icons.movie), label: ""),
+                BottomNavigationBarItem(icon: Icon(Icons.person), label: ""),
+              ],
+              currentIndex: _page,
+              onTap: navigationTapped,
+            ),
+          ),
+        ),
+        body: PageView(
+          controller: pageController,
+          onPageChanged: onPageChanged,
+          physics: NeverScrollableScrollPhysics(),
+          children: items,
+        ),
       ),
     );
   }

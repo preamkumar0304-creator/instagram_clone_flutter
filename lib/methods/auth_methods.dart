@@ -204,4 +204,34 @@ class AuthMethods {
   Future<void> signOut() async {
     await _auth.signOut();
   }
+
+  Future<String?> checkEmailAvailability(String email) async {
+    final trimmedEmail = email.trim();
+    if (trimmedEmail.isEmpty) {
+      return "Please enter your email address.";
+    }
+
+    try {
+      final existingUsers =
+          await _firestore
+              .collection("users")
+              .where("email", isEqualTo: trimmedEmail)
+              .limit(1)
+              .get();
+      if (existingUsers.docs.isNotEmpty) {
+        return "This email already exists. Try logging in instead.";
+      }
+      return null;
+    } on FirebaseException catch (err) {
+      if (err.code == "permission-denied") {
+        return "Unable to verify this email right now. Please try again.";
+      }
+      if (err.code == "unavailable") {
+        return "No internet connection. Please check your network and try again.";
+      }
+      return "Unable to verify this email right now. Please try again.";
+    } catch (err) {
+      return "Unexpected error while checking email. Please try again.";
+    }
+  }
 }

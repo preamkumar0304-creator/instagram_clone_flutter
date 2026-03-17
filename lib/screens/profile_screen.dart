@@ -41,6 +41,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _userSub;
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _storySub;
   bool _hasActiveStory = false;
+  bool _hasUnseenStory = false;
+  bool _markedStoriesViewed = false;
 
   String _safeString(dynamic value) {
     if (value == null) return "";
@@ -93,7 +95,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
         .listen((snap) {
       if (!mounted) return;
       final now = DateTime.now();
-      final hasStory = snap.docs.any((doc) {
+      final viewerUid = FirebaseAuth.instance.currentUser?.uid ?? "";
+      var hasStory = false;
+      var hasUnseen = false;
+      for (final doc in snap.docs) {
         final data = doc.data();
         final expiresAt = data["expiresAt"];
         DateTime? expires;
@@ -102,12 +107,44 @@ class _ProfileScreenState extends State<ProfileScreen> {
         } else if (expiresAt is DateTime) {
           expires = expiresAt;
         }
-        if (expires == null) return true;
-        return expires.isAfter(now);
-      });
+        if (expires != null && expires.isBefore(now)) {
+          continue;
+        }
+        hasStory = true;
+        if (viewerUid.isEmpty) {
+          hasUnseen = true;
+          continue;
+        }
+        if (viewerUid == widget.uid) {
+          final ownerViewed = data["ownerViewed"] == true;
+          if (!ownerViewed) {
+            hasUnseen = true;
+          }
+        } else {
+          final viewers = _safeStringList(data["viewers"]);
+          if (!viewers.contains(viewerUid)) {
+            hasUnseen = true;
+          }
+        }
+        if (hasUnseen) {
+          break;
+        }
+      }
       setState(() {
         _hasActiveStory = hasStory;
+        _hasUnseenStory = hasUnseen;
       });
+
+      if (!_markedStoriesViewed &&
+          hasStory &&
+          viewerUid.isNotEmpty &&
+          viewerUid != widget.uid) {
+        _markedStoriesViewed = true;
+        FirestoreMethods().markStoriesViewed(
+          ownerUid: widget.uid,
+          viewerUid: viewerUid,
+        );
+      }
     });
   }
 
@@ -570,7 +607,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
                             gradient:
-                                _hasActiveStory
+                                _hasActiveStory && _hasUnseenStory
                                     ? const LinearGradient(
                                       colors: [
                                         Color(0xFFF58529),
@@ -584,7 +621,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                     : null,
                             border:
                                 _hasActiveStory
-                                    ? null
+                                    ? (_hasUnseenStory
+                                        ? null
+                                        : Border.all(
+                                          color: secondaryColor,
+                                          width: 1,
+                                        ))
                                     : Border.all(
                                       color: secondaryColor,
                                       width: 1,
@@ -747,7 +789,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                   });
                                 },
                                 textClr: Colors.black,
-                                bgClr: primaryColor,
+                                bgClr: Colors.grey.shade200,
                                 radius: 5,
                                 height: 35,
                                 fontSize: 14,
@@ -774,7 +816,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                     userData["followers"] = list;
                                   });
                                 },
-                                textClr: primaryColor,
+                                textClr: Colors.white,
                                 bgClr: blueColor,
                                 radius: 5,
                                 height: 35,
@@ -807,7 +849,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
               _buildHighlightsRow(isOwner),
               const SizedBox(height: 10),
               const TabBar(
-                indicatorColor: primaryColor,
+                indicator: UnderlineTabIndicator(
+                  borderSide: BorderSide(color: Colors.transparent, width: 0),
+                ),
+                indicatorColor: Colors.transparent,
+                dividerColor: Colors.transparent,
                 tabs: [
                   Tab(icon: Icon(Icons.grid_on, color: primaryColor)),
                   Tab(icon: Icon(Icons.video_library, color: primaryColor)),
@@ -885,6 +931,7 @@ class _PostsGrid extends StatelessWidget {
       future: FirebaseFirestore.instance
           .collection("posts")
           .where("uid", isEqualTo: uid)
+          .orderBy("postedDate", descending: true)
           .get(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {

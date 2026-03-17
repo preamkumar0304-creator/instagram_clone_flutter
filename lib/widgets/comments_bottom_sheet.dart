@@ -54,7 +54,7 @@ class _CommentsBottomSheetState extends State<CommentsBottomSheet> {
           height: MediaQuery.of(context).size.height * 0.75,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.vertical(top: Radius.circular(40)),
-            color: secondaryColor.shade900,
+            color: mobileBackgroundColor,
           ),
           child: Column(
             children: [

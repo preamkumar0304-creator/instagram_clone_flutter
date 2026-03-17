@@ -1,9 +1,9 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:instagram_clone_flutter_firebase/utils/colors.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 
-class ShareProfileSheet extends StatefulWidget {
+class ShareProfileSheet extends StatelessWidget {
   final String profileUid;
   final String profileUsername;
   final String profilePhotoUrl;
@@ -15,280 +15,229 @@ class ShareProfileSheet extends StatefulWidget {
     required this.profilePhotoUrl,
   });
 
-  @override
-  State<ShareProfileSheet> createState() => _ShareProfileSheetState();
-}
-
-class _ShareProfileSheetState extends State<ShareProfileSheet> {
-  bool _isSending = false;
-  final TextEditingController _searchController = TextEditingController();
-  final FocusNode _searchFocus = FocusNode();
-  String _followersKey = "";
-  Future<List<Map<String, dynamic>>>? _followersFuture;
-
-  Future<List<Map<String, dynamic>>> _loadUsers(List<String> ids) async {
-    if (ids.isEmpty) return [];
-    final List<Map<String, dynamic>> results = [];
-    for (var i = 0; i < ids.length; i += 10) {
-      final chunk = ids.sublist(i, i + 10 > ids.length ? ids.length : i + 10);
-      final snap =
-          await FirebaseFirestore.instance
-              .collection("users")
-              .where(FieldPath.documentId, whereIn: chunk)
-              .get();
-      for (final doc in snap.docs) {
-        final data = doc.data();
-        results.add({
-          "uid": doc.id,
-          "username": data["username"] ?? "",
-          "photoUrl": data["photoUrl"] ?? "",
-        });
-      }
-    }
-    return results;
-  }
-
-  Future<void> _sendTo(String targetUid) async {
-    if (_isSending) return;
-    setState(() {
-      _isSending = true;
-    });
-    try {
-      final fromUid = FirebaseAuth.instance.currentUser!.uid;
-      await FirebaseFirestore.instance
-          .collection("users")
-          .doc(targetUid)
-          .collection("shares")
-          .add({
-            "type": "profile",
-            "fromUid": fromUid,
-            "profileUid": widget.profileUid,
-            "profileUsername": widget.profileUsername,
-            "profilePhotoUrl": widget.profilePhotoUrl,
-            "createdAt": FieldValue.serverTimestamp(),
-          });
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Shared"),
-            backgroundColor: successColor,
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(e.toString()),
-            backgroundColor: errorColor,
-          ),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isSending = false;
-        });
-      }
-    }
-  }
-
-  Future<List<Map<String, dynamic>>> _followersFutureFor(List<String> ids) {
-    final key = ids.join(",");
-    if (_followersFuture == null || _followersKey != key) {
-      _followersKey = key;
-      _followersFuture = _loadUsers(ids);
-    }
-    return _followersFuture!;
-  }
-
-  @override
-  void dispose() {
-    _searchController.dispose();
-    _searchFocus.dispose();
-    super.dispose();
+  String _profileLink() {
+    final handle =
+        profileUsername.isNotEmpty ? profileUsername : profileUid;
+    return "instagram_clone://profile/$handle";
   }
 
   @override
   Widget build(BuildContext context) {
-    final currentUid = FirebaseAuth.instance.currentUser?.uid;
-    if (currentUid == null) {
-      return const SizedBox.shrink();
-    }
-    const sheetBg = Colors.white;
-    const sheetText = Colors.black87;
-    const sheetHint = Colors.black45;
-    const sheetBorder = Colors.black12;
-    const searchFill = Color(0xFFF2F2F2);
+    final handle =
+        profileUsername.isNotEmpty ? "@$profileUsername" : "@user";
+    final qrData = _profileLink();
 
-    return DraggableScrollableSheet(
-      initialChildSize: 0.6,
-      minChildSize: 0.4,
-      maxChildSize: 0.9,
-      builder: (context, scrollController) {
-        return AnimatedPadding(
-          duration: const Duration(milliseconds: 150),
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(context).viewInsets.bottom,
-          ),
-          child: Container(
-            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
-            decoration: const BoxDecoration(
-              color: sheetBg,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-            ),
-            child: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-              stream:
-                  FirebaseFirestore.instance
-                      .collection("users")
-                      .doc(currentUid)
-                      .snapshots(),
-              builder: (context, snapshot) {
-                final data = snapshot.data?.data() ?? {};
-                final followers =
-                    (data["followers"] as List?)
-                        ?.whereType<String>()
-                        .toList() ??
-                    [];
-                if (followers.isEmpty) {
-                  return const Center(
-                    child: Text(
-                      "No followers to share with.",
-                      style: TextStyle(color: sheetText),
+    return SafeArea(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: const BoxDecoration(
+          color: mobileBackgroundColor,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.close, color: primaryColor),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+                const Spacer(),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: secondaryColor),
+                    borderRadius: BorderRadius.circular(24),
+                  ),
+                  child: const Text(
+                    "EMOJI",
+                    style: TextStyle(
+                      color: primaryColor,
+                      fontWeight: FontWeight.w600,
                     ),
-                  );
-                }
-
-                return FutureBuilder<List<Map<String, dynamic>>>(
-                  future: _followersFutureFor(followers),
-                  builder: (context, usersSnap) {
-                    if (usersSnap.connectionState == ConnectionState.waiting) {
-                      return const Center(
-                        child: CircularProgressIndicator(color: primaryColor),
-                      );
-                    }
-                    final users = usersSnap.data ?? [];
-
-                    return Column(
+                  ),
+                ),
+                const Spacer(),
+                const SizedBox(width: 40),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Stack(
+              children: [
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: Opacity(
+                      opacity: 0.12,
+                      child: Wrap(
+                        alignment: WrapAlignment.center,
+                        spacing: 26,
+                        runSpacing: 26,
+                        children: List.generate(
+                          24,
+                          (_) => const Icon(
+                            Icons.emoji_emotions,
+                            color: Colors.amber,
+                            size: 42,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                Center(
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(vertical: 24),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 18,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.08),
+                          blurRadius: 18,
+                          offset: const Offset(0, 8),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        Center(
-                          child: Container(
-                            width: 36,
-                            height: 4,
-                            decoration: BoxDecoration(
-                              color: sheetBorder,
-                              borderRadius: BorderRadius.circular(999),
+                        Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            QrImageView(
+                              data: qrData,
+                              size: 220,
+                              foregroundColor: const Color(0xFFD67E10),
                             ),
-                          ),
+                            Container(
+                              width: 42,
+                              height: 42,
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: const Color(0xFFD67E10),
+                                  width: 2,
+                                ),
+                              ),
+                              child: const Icon(
+                                Icons.camera_alt,
+                                color: Color(0xFFD67E10),
+                                size: 20,
+                              ),
+                            ),
+                          ],
                         ),
                         const SizedBox(height: 12),
-                        TextField(
-                          focusNode: _searchFocus,
-                          controller: _searchController,
-                          autofocus: true,
-                          textInputAction: TextInputAction.search,
-                          keyboardType: TextInputType.text,
-                          style: const TextStyle(color: sheetText),
-                          decoration: InputDecoration(
-                            hintText: "Search",
-                            hintStyle: const TextStyle(color: sheetHint),
-                            prefixIcon: const Icon(
-                              Icons.search,
-                              color: sheetHint,
-                            ),
-                            filled: true,
-                            fillColor: searchFill,
-                            enabledBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide: const BorderSide(color: sheetBorder),
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide: const BorderSide(color: blueColor),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        Expanded(
-                          child: ValueListenableBuilder<TextEditingValue>(
-                            valueListenable: _searchController,
-                            builder: (context, value, _) {
-                              final query = value.text.trim().toLowerCase();
-                              final filtered =
-                                  query.isEmpty
-                                      ? users
-                                      : users
-                                          .where(
-                                            (u) => (u["username"] ?? "")
-                                                .toString()
-                                                .toLowerCase()
-                                                .contains(query),
-                                          )
-                                          .toList();
-
-                              return GridView.builder(
-                                controller: scrollController,
-                                gridDelegate:
-                                    const SliverGridDelegateWithFixedCrossAxisCount(
-                                      crossAxisCount: 3,
-                                      crossAxisSpacing: 10,
-                                      mainAxisSpacing: 10,
-                                      childAspectRatio: 0.8,
-                                    ),
-                                itemCount: filtered.length,
-                                itemBuilder: (context, index) {
-                                  final user = filtered[index];
-                                  final uid = (user["uid"] ?? "") as String;
-                                  final username =
-                                      (user["username"] ?? "") as String;
-                                  final photoUrl =
-                                      (user["photoUrl"] ?? "") as String;
-                                  return GestureDetector(
-                                    onTap:
-                                        _isSending ? null : () => _sendTo(uid),
-                                    child: Column(
-                                      children: [
-                                        CircleAvatar(
-                                          radius: 28,
-                                          backgroundImage:
-                                              photoUrl.isNotEmpty
-                                                  ? NetworkImage(photoUrl)
-                                                  : null,
-                                          child:
-                                              photoUrl.isEmpty
-                                                  ? const Icon(
-                                                    Icons.person,
-                                                    color: Colors.white,
-                                                  )
-                                                  : null,
-                                        ),
-                                        const SizedBox(height: 6),
-                                        Text(
-                                          username,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: const TextStyle(
-                                            color: sheetText,
-                                            fontSize: 12,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  );
-                                },
-                              );
-                            },
+                        Text(
+                          handle,
+                          style: const TextStyle(
+                            color: Color(0xFFD67E10),
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 1.1,
                           ),
                         ),
                       ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                _ShareAction(
+                  label: "Share profile",
+                  icon: Icons.share,
+                  onTap: () {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text("Share coming soon."),
+                        backgroundColor: secondaryColor,
+                      ),
                     );
                   },
-                );
-              },
+                ),
+                _ShareAction(
+                  label: "Copy link",
+                  icon: Icons.link,
+                  onTap: () async {
+                    await Clipboard.setData(ClipboardData(text: qrData));
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text("Profile link copied."),
+                          backgroundColor: successColor,
+                        ),
+                      );
+                    }
+                  },
+                ),
+                _ShareAction(
+                  label: "Download",
+                  icon: Icons.download,
+                  onTap: () {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text("Download coming soon."),
+                        backgroundColor: secondaryColor,
+                      ),
+                    );
+                  },
+                ),
+              ],
             ),
+            const SizedBox(height: 12),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ShareAction extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final VoidCallback onTap;
+
+  const _ShareAction({
+    required this.label,
+    required this.icon,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(24),
+      child: Column(
+        children: [
+          Container(
+            width: 52,
+            height: 52,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.black12),
+              color: Colors.white,
+            ),
+            child: Icon(icon, color: primaryColor),
           ),
-        );
-      },
+          const SizedBox(height: 6),
+          Text(
+            label,
+            style: const TextStyle(color: primaryColor, fontSize: 12),
+          ),
+        ],
+      ),
     );
   }
 }

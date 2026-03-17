@@ -6,6 +6,7 @@ import 'package:instagram_clone_flutter_firebase/methods/firestore_methods.dart'
 import 'package:instagram_clone_flutter_firebase/models/story_media_item.dart';
 import 'package:instagram_clone_flutter_firebase/providers/user_provider.dart';
 import 'package:instagram_clone_flutter_firebase/screens/add_post_screen.dart';
+import 'package:instagram_clone_flutter_firebase/screens/activity_screen.dart';
 import 'package:instagram_clone_flutter_firebase/screens/profile_screen.dart';
 import 'package:instagram_clone_flutter_firebase/screens/story_compose_screen.dart';
 import 'package:instagram_clone_flutter_firebase/screens/story_viewer_screen.dart';
@@ -34,6 +35,16 @@ class FeedScreen extends StatelessWidget {
     final boosted =
         posts.where((p) {
           if (p["isBoosted"] != true) return false;
+          final boostedAtRaw = p["boostedAt"];
+          DateTime? boostedAt;
+          if (boostedAtRaw is Timestamp) {
+            boostedAt = boostedAtRaw.toDate();
+          } else if (boostedAtRaw is DateTime) {
+            boostedAt = boostedAtRaw;
+          }
+          if (boostedAt != null && boostedAt.isAfter(now)) {
+            return false;
+          }
           final expiresAt = p["boostExpiresAt"];
           DateTime? expires;
           if (expiresAt is Timestamp) {
@@ -47,16 +58,31 @@ class FeedScreen extends StatelessWidget {
     if (boosted.isEmpty) return posts;
 
     final intervalOverride = _safeInt(boosted.first["boostInterval"]);
-    final effectiveInterval = intervalOverride > 0 ? intervalOverride : interval;
+    final effectiveInterval =
+        intervalOverride > 0 ? intervalOverride : interval;
 
     final result = <Map<String, dynamic>>[];
+    final insertionCounts = <String, int>{};
     var boostIndex = 0;
     for (var i = 0; i < posts.length; i++) {
       result.add(posts[i]);
       final shouldInsert = (i + 1) % effectiveInterval == 0;
       if (shouldInsert) {
-        result.add(boosted[boostIndex % boosted.length]);
-        boostIndex++;
+        var attempts = 0;
+        while (attempts < boosted.length) {
+          final candidate = boosted[boostIndex % boosted.length];
+          boostIndex++;
+          attempts++;
+          final postId = (candidate["postId"] ?? "").toString();
+          if (postId.isEmpty) continue;
+          final maxInsertions = _safeInt(candidate["boostMaxInsertions"]);
+          final allowed = maxInsertions > 0 ? maxInsertions : 8;
+          final current = insertionCounts[postId] ?? 0;
+          if (current >= allowed) continue;
+          insertionCounts[postId] = current + 1;
+          result.add(candidate);
+          break;
+        }
       }
     }
     return result;
@@ -90,6 +116,32 @@ class FeedScreen extends StatelessWidget {
                   width: 32,
                 ),
                 actions: [
+                  IconButton(
+                    onPressed: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const ActivityScreen(),
+                        ),
+                      );
+                    },
+                    icon: const Icon(
+                      Icons.favorite_border,
+                      color: primaryColor,
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const AddPostScreen(),
+                        ),
+                      );
+                    },
+                    icon: const Icon(
+                      Icons.add_box_outlined,
+                      color: primaryColor,
+                    ),
+                  ),
                   IconButton(
                     onPressed: () {
                       Navigator.of(context).push(
@@ -155,11 +207,33 @@ class _StoriesRow extends StatefulWidget {
 
 class _StoriesRowState extends State<_StoriesRow> {
   Future<List<Map<String, dynamic>>>? _storiesFuture;
+  late final VoidCallback _storyRefreshListener;
+
+  bool _isUnseenStory(Map<String, dynamic> data, String viewerUid) {
+    if (viewerUid.isEmpty) return true;
+    final ownerUid = (data["uid"] ?? "").toString();
+    if (ownerUid.isNotEmpty && ownerUid == viewerUid) {
+      return data["ownerViewed"] != true;
+    }
+    final viewersRaw = data["viewers"];
+    final viewers =
+        viewersRaw is List
+            ? viewersRaw.whereType<String>().toList()
+            : <String>[];
+    return !viewers.contains(viewerUid);
+  }
 
   @override
   void initState() {
     super.initState();
     _storiesFuture = _loadStories();
+    _storyRefreshListener = () {
+      if (!mounted) return;
+      setState(() {
+        _storiesFuture = _loadStories();
+      });
+    };
+    storyRefreshNotifier.addListener(_storyRefreshListener);
   }
 
   @override
@@ -170,19 +244,37 @@ class _StoriesRowState extends State<_StoriesRow> {
     }
   }
 
+  @override
+  void dispose() {
+    storyRefreshNotifier.removeListener(_storyRefreshListener);
+    super.dispose();
+  }
+
   Future<List<Map<String, dynamic>>> _loadStories() async {
     await FirestoreMethods().archiveExpiredStories(widget.user.uid);
     final following =
         (widget.user.following as List).whereType<String>().toList();
     final orderedUids = <String>[widget.user.uid, ...following];
-    final uniqueUids = orderedUids.toSet().toList();
-    if (uniqueUids.isEmpty) return [];
+    final orderedUniqueUids = <String>[];
+    final seenUids = <String>{};
+    for (final uid in orderedUids) {
+      if (uid.isEmpty) continue;
+      if (seenUids.add(uid)) {
+        orderedUniqueUids.add(uid);
+      }
+    }
+    if (orderedUniqueUids.isEmpty) return [];
 
     final storyByUid = <String, Map<String, dynamic>>{};
-    for (var i = 0; i < uniqueUids.length; i += 10) {
-      final chunk = uniqueUids.sublist(
+    final storyHasByUid = <String, bool>{};
+    final storyUnseenByUid = <String, bool>{};
+    final seenStoryIds = <String>{};
+    for (var i = 0; i < orderedUniqueUids.length; i += 10) {
+      final chunk = orderedUniqueUids.sublist(
         i,
-        i + 10 > uniqueUids.length ? uniqueUids.length : i + 10,
+        i + 10 > orderedUniqueUids.length
+            ? orderedUniqueUids.length
+            : i + 10,
       );
       final snap =
           await FirebaseFirestore.instance
@@ -191,6 +283,10 @@ class _StoriesRowState extends State<_StoriesRow> {
               .get();
       for (final doc in snap.docs) {
         final data = doc.data();
+        final storyId = (data["storyId"] ?? doc.id).toString();
+        if (storyId.isNotEmpty && !seenStoryIds.add(storyId)) {
+          continue;
+        }
         final expiresAt = data["expiresAt"];
         DateTime? expires;
         if (expiresAt is Timestamp) {
@@ -203,6 +299,9 @@ class _StoriesRowState extends State<_StoriesRow> {
         }
         final uid = (data["uid"] ?? "").toString();
         if (uid.isEmpty) continue;
+        storyHasByUid[uid] = true;
+        final unseen = _isUnseenStory(data, widget.user.uid);
+        storyUnseenByUid[uid] = (storyUnseenByUid[uid] ?? false) || unseen;
         if (!storyByUid.containsKey(uid)) {
           storyByUid[uid] = data;
           continue;
@@ -251,25 +350,27 @@ class _StoriesRowState extends State<_StoriesRow> {
     }
 
     final results = <Map<String, dynamic>>[];
-    for (final uid in orderedUids) {
-      if (uid == widget.user.uid) {
-        results.add({
-          "uid": uid,
-          "username": widget.user.username,
-          "photoUrl": widget.user.photoUrl,
-          "isYou": true,
-          "hasStory": storyByUid.containsKey(uid),
-        });
-        continue;
-      }
-      if (!storyByUid.containsKey(uid)) continue;
+    for (final uid in orderedUniqueUids) {
+        if (uid == widget.user.uid) {
+          results.add({
+            "uid": uid,
+            "username": widget.user.username,
+            "photoUrl": widget.user.photoUrl,
+            "isYou": true,
+            "hasStory": storyHasByUid[uid] == true,
+            "hasUnseenStory": storyUnseenByUid[uid] == true,
+          });
+          continue;
+        }
+      if (storyHasByUid[uid] != true) continue;
       final userData = usersByUid[uid] ?? {};
       results.add({
         "uid": uid,
         "username": (userData["username"] ?? "").toString(),
         "photoUrl": (userData["photoUrl"] ?? "").toString(),
         "isYou": false,
-        "hasStory": true,
+        "hasStory": storyHasByUid[uid] == true,
+        "hasUnseenStory": storyUnseenByUid[uid] == true,
       });
     }
 
@@ -322,22 +423,102 @@ class _StoriesRowState extends State<_StoriesRow> {
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             itemBuilder: (context, index) {
               final item = stories[index];
+              final isYou = item["isYou"] == true;
+              if (isYou) {
+                return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                  stream:
+                      FirebaseFirestore.instance
+                          .collection("stories")
+                          .where("uid", isEqualTo: widget.user.uid)
+                          .snapshots(),
+                  builder: (context, snapshot) {
+                    var hasStory = item["hasStory"] == true;
+                    var hasUnseen = item["hasUnseenStory"] == true;
+                    if (snapshot.hasData) {
+                      hasStory = false;
+                      hasUnseen = false;
+                      final now = DateTime.now();
+                      for (final doc in snapshot.data!.docs) {
+                        final data = doc.data();
+                        final expiresAt = data["expiresAt"];
+                        DateTime? expires;
+                        if (expiresAt is Timestamp) {
+                          expires = expiresAt.toDate();
+                        } else if (expiresAt is DateTime) {
+                          expires = expiresAt;
+                        }
+                        if (expires != null && expires.isBefore(now)) {
+                          continue;
+                        }
+                        hasStory = true;
+                        if (data["ownerViewed"] != true) {
+                          hasUnseen = true;
+                          break;
+                        }
+                      }
+                    }
+                    return _StoryAvatar(
+                      username: item["username"] ?? "",
+                      photoUrl: item["photoUrl"] ?? "",
+                      isYou: true,
+                      hasStory: hasStory,
+                      hasUnseenStory: hasUnseen,
+                      onTap: () async {
+                        if (!hasStory) {
+                          await Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => const AddPostScreen(),
+                            ),
+                          );
+                          if (!mounted) return;
+                          setState(() {
+                            _storiesFuture = _loadStories();
+                          });
+                          return;
+                        }
+                        await Navigator.of(context).push(
+                          PageRouteBuilder(
+                            transitionDuration: Duration.zero,
+                            reverseTransitionDuration: Duration.zero,
+                            opaque: true,
+                            barrierColor: Colors.black,
+                            pageBuilder:
+                                (_, __, ___) => StoryViewerScreen(
+                                  ownerUid: item["uid"] ?? "",
+                                  viewerUid: widget.user.uid,
+                                ),
+                          ),
+                        );
+                        if (!mounted) return;
+                        setState(() {
+                          _storiesFuture = _loadStories();
+                        });
+                      },
+                      onAddStory: () async {
+                        await Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const AddPostScreen(),
+                          ),
+                        );
+                        if (!mounted) return;
+                        setState(() {
+                          _storiesFuture = _loadStories();
+                        });
+                      },
+                    );
+                  },
+                );
+              }
+              final hasStory = item["hasStory"] == true;
               return _StoryAvatar(
                 username: item["username"] ?? "",
                 photoUrl: item["photoUrl"] ?? "",
-                isYou: item["isYou"] == true,
-                hasStory: item["hasStory"] == true,
-                onTap: () {
-                  final isYou = item["isYou"] == true;
-                  final hasStory = item["hasStory"] == true;
-                  if (isYou && !hasStory) {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const AddPostScreen()),
-                    );
-                    return;
-                  }
+                isYou: false,
+                hasStory: hasStory,
+                hasUnseenStory: item["hasUnseenStory"] == true,
+                onTap: () async {
                   if (!hasStory) return;
-                  Navigator.of(context).push(
+                  await Navigator.of(context).push(
                     PageRouteBuilder(
                       transitionDuration: Duration.zero,
                       reverseTransitionDuration: Duration.zero,
@@ -350,13 +531,10 @@ class _StoriesRowState extends State<_StoriesRow> {
                           ),
                     ),
                   );
-                },
-                onAddStory: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => const AddPostScreen(),
-                    ),
-                  );
+                  if (!mounted) return;
+                  setState(() {
+                    _storiesFuture = _loadStories();
+                  });
                 },
               );
             },
@@ -374,6 +552,7 @@ class _StoryAvatar extends StatelessWidget {
   final String photoUrl;
   final bool isYou;
   final bool hasStory;
+  final bool hasUnseenStory;
   final VoidCallback? onTap;
   final VoidCallback? onAddStory;
 
@@ -382,6 +561,7 @@ class _StoryAvatar extends StatelessWidget {
     required this.photoUrl,
     required this.isYou,
     required this.hasStory,
+    required this.hasUnseenStory,
     this.onTap,
     this.onAddStory,
   });
@@ -398,6 +578,7 @@ class _StoryAvatar extends StatelessWidget {
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
     );
+    final showGradient = hasStory && hasUnseenStory;
     final avatar = Column(
       children: [
         Stack(
@@ -406,9 +587,9 @@ class _StoryAvatar extends StatelessWidget {
               padding: const EdgeInsets.all(2),
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                gradient: hasStory ? ringGradient : null,
+                gradient: showGradient ? ringGradient : null,
                 border:
-                    hasStory
+                    showGradient
                         ? null
                         : Border.all(color: secondaryColor, width: 1),
               ),
@@ -482,7 +663,9 @@ class _AppBarStoryAvatar extends StatelessWidget {
       builder: (context, snapshot) {
         final docs = snapshot.data?.docs ?? [];
         final now = DateTime.now();
-        final hasStory = docs.any((doc) {
+        var hasStory = false;
+        var hasUnseen = false;
+        for (final doc in docs) {
           final data = doc.data();
           final expiresAt = data["expiresAt"];
           DateTime? expires;
@@ -491,9 +674,15 @@ class _AppBarStoryAvatar extends StatelessWidget {
           } else if (expiresAt is DateTime) {
             expires = expiresAt;
           }
-          if (expires == null) return true;
-          return expires.isAfter(now);
-        });
+          if (expires != null && expires.isBefore(now)) {
+            continue;
+          }
+          hasStory = true;
+          if (data["ownerViewed"] != true) {
+            hasUnseen = true;
+            break;
+          }
+        }
         return GestureDetector(
           onTap: () {
             Navigator.of(context).push(
@@ -505,7 +694,7 @@ class _AppBarStoryAvatar extends StatelessWidget {
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               gradient:
-                  hasStory
+                  hasStory && hasUnseen
                       ? const LinearGradient(
                         colors: [
                           Color(0xFFF58529),
@@ -518,7 +707,7 @@ class _AppBarStoryAvatar extends StatelessWidget {
                       )
                       : null,
               border:
-                  hasStory
+                  hasStory && hasUnseen
                       ? null
                       : Border.all(color: secondaryColor, width: 1),
             ),

@@ -31,33 +31,24 @@ class MyApp extends StatelessWidget {
       ],
       child: Consumer<ThemeProvider>(
         builder: (context, themeProvider, child) {
+          final baseTheme = ThemeData.light().copyWith(
+            scaffoldBackgroundColor: Colors.white,
+            appBarTheme: const AppBarTheme(
+              backgroundColor: Colors.white,
+              foregroundColor: Colors.black,
+            ),
+            iconTheme: const IconThemeData(color: Colors.black),
+            textTheme: const TextTheme(
+              bodyMedium: TextStyle(color: Colors.black),
+            ),
+          );
           return MaterialApp(
             title: 'Instagram Clone',
             debugShowCheckedModeBanner: false,
             themeMode:
                 themeProvider.isDarkMode ? ThemeMode.dark : ThemeMode.light, // ✅
-            theme: ThemeData.light().copyWith(
-              scaffoldBackgroundColor: Colors.white,
-              appBarTheme: const AppBarTheme(
-                backgroundColor: Colors.white,
-                foregroundColor: Colors.black,
-              ),
-              iconTheme: const IconThemeData(color: Colors.black),
-              textTheme: const TextTheme(
-                bodyMedium: TextStyle(color: Colors.black),
-              ),
-            ),
-            darkTheme: ThemeData.dark().copyWith(
-              scaffoldBackgroundColor: mobileBackgroundColor,
-              appBarTheme: const AppBarTheme(
-                backgroundColor: Colors.black,
-                foregroundColor: Colors.white,
-              ),
-              iconTheme: const IconThemeData(color: Colors.white),
-              textTheme: const TextTheme(
-                bodyMedium: TextStyle(color: Colors.white),
-              ),
-            ),
+            theme: baseTheme,
+            darkTheme: baseTheme,
             home: StreamBuilder(
               stream: FirebaseAuth.instance.authStateChanges(),
               builder: (context, snapshot) {

@@ -3,7 +3,9 @@ import 'package:image_picker/image_picker.dart';
 import 'package:instagram_clone_flutter_firebase/methods/firestore_methods.dart';
 import 'package:instagram_clone_flutter_firebase/models/story_media_item.dart';
 import 'package:instagram_clone_flutter_firebase/models/users.dart';
+import 'package:instagram_clone_flutter_firebase/screens/story_viewer_screen.dart';
 import 'package:instagram_clone_flutter_firebase/utils/colors.dart';
+import 'package:instagram_clone_flutter_firebase/utils/global_variables.dart';
 import 'package:instagram_clone_flutter_firebase/utils/utils.dart';
 
 class StoryComposeScreen extends StatefulWidget {
@@ -22,6 +24,39 @@ class _StoryComposeScreenState extends State<StoryComposeScreen> {
   int _uploadedCount = 0;
   late final PageController _pageController;
   late List<StoryMediaItem> _items;
+
+  Future<bool> _confirmDiscard() async {
+    if (_isUploading) return false;
+    final hasItems = _items.isNotEmpty;
+    if (!hasItems) return true;
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: mobileBackgroundColor,
+          title: const Text(
+            "Discard story?",
+            style: TextStyle(color: primaryColor),
+          ),
+          content: const Text(
+            "If you go back now, your story will be discarded.",
+            style: TextStyle(color: secondaryColor),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text("Continue", style: TextStyle(color: primaryColor)),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text("Discard", style: TextStyle(color: errorColor)),
+            ),
+          ],
+        );
+      },
+    );
+    return result ?? false;
+  }
 
   @override
   void initState() {
@@ -104,7 +139,17 @@ class _StoryComposeScreenState extends State<StoryComposeScreen> {
         content: total == 1 ? "Story added." : "$successCount stories added.",
         clr: successColor,
       );
-      Navigator.pop(context);
+      storyRefreshNotifier.value++;
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder:
+              (_) => StoryViewerScreen(
+                ownerUid: widget.user.uid,
+                viewerUid: widget.user.uid,
+                goHomeOnClose: true,
+              ),
+        ),
+      );
       return;
     }
     final failureCount = total - successCount;
@@ -125,11 +170,13 @@ class _StoryComposeScreenState extends State<StoryComposeScreen> {
   Widget build(BuildContext context) {
     final total = _items.length;
     final current = total == 0 ? 0 : _currentIndex + 1;
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: SafeArea(
-        child: Stack(
-          children: [
+    return WillPopScope(
+      onWillPop: _confirmDiscard,
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: SafeArea(
+          child: Stack(
+            children: [
             Positioned.fill(
               child:
                   total == 0
@@ -170,9 +217,15 @@ class _StoryComposeScreenState extends State<StoryComposeScreen> {
                               ),
                             );
                           }
-                          return Image.memory(
-                            item.bytes!,
-                            fit: BoxFit.cover,
+                          return InteractiveViewer(
+                            minScale: 1.0,
+                            maxScale: 4.0,
+                            child: Image.memory(
+                              item.bytes!,
+                              fit: BoxFit.cover,
+                              width: double.infinity,
+                              height: double.infinity,
+                            ),
                           );
                         },
                       ),
@@ -182,7 +235,12 @@ class _StoryComposeScreenState extends State<StoryComposeScreen> {
               left: 8,
               child: IconButton(
                 icon: const Icon(Icons.close, color: Colors.white),
-                onPressed: () => Navigator.pop(context),
+                onPressed: () async {
+                  final discard = await _confirmDiscard();
+                  if (discard && mounted) {
+                    Navigator.pop(context);
+                  }
+                },
               ),
             ),
             if (total > 1)
@@ -360,7 +418,8 @@ class _StoryComposeScreenState extends State<StoryComposeScreen> {
                 ],
               ),
             ),
-          ],
+            ],
+          ),
         ),
       ),
     );

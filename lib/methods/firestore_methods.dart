@@ -229,6 +229,8 @@ class FirestoreMethods {
       String storyUrl = "";
       String storyType = "image";
       int storyDuration = 5;
+      final storyId = const Uuid().v1();
+      final storyRef = _firestore.collection("stories").doc(storyId);
       if (type == StoryMediaType.video) {
         if (videoBytes == null || videoBytes.isEmpty) {
           return "Video file is empty.";
@@ -238,6 +240,7 @@ class FirestoreMethods {
           videoBytes,
           true,
           contentType: "video/mp4",
+          fileName: storyId,
         );
         storyType = "video";
         storyDuration = 15;
@@ -249,9 +252,9 @@ class FirestoreMethods {
           "stories",
           imageBytes,
           true,
+          fileName: storyId,
         );
       }
-      final storyId = const Uuid().v1();
       final now = DateTime.now();
       final data = {
         "storyId": storyId,
@@ -265,9 +268,56 @@ class FirestoreMethods {
         "expiresAt": now.add(const Duration(hours: 24)),
         "viewers": <String>[],
         "viewerCount": 0,
+        "ownerViewed": false,
       };
-      await _firestore.collection("stories").doc(storyId).set(data);
+      await storyRef.set(data);
       message = "Story added.";
+    } on FirebaseException catch (err) {
+      if (err.code == "canceled" || err.code == "cancelled") {
+        message = "Upload was canceled. Please keep the app open and try again.";
+      } else if (err.code == "unauthorized") {
+        message = "Upload is blocked by Firebase Storage rules.";
+      } else if (err.code == "network-request-failed") {
+        message = "Network issue while uploading. Please try again.";
+      } else {
+        message = err.message ?? err.toString();
+      }
+    } catch (e) {
+      message = e.toString();
+    }
+    return message;
+  }
+
+  Future<String> uploadReel({
+    required Uint8List videoBytes,
+    required String uid,
+    required String username,
+    required String profileUrl,
+  }) async {
+    String message = "";
+    try {
+      if (videoBytes.isEmpty) {
+        return "Video file is empty.";
+      }
+      final reelId = const Uuid().v1();
+      final reelUrl = await StorageMethods().uploadBytesToStorage(
+        "reels",
+        videoBytes,
+        true,
+        contentType: "video/mp4",
+        fileName: reelId,
+      );
+      final now = DateTime.now();
+      await _firestore.collection("reels").doc(reelId).set({
+        "reelId": reelId,
+        "uid": uid,
+        "username": username,
+        "photoUrl": profileUrl,
+        "reelUrl": reelUrl,
+        "title": "Reel",
+        "createdAt": now,
+      });
+      message = "Reel added.";
     } on FirebaseException catch (err) {
       if (err.code == "canceled" || err.code == "cancelled") {
         message = "Upload was canceled. Please keep the app open and try again.";
@@ -296,7 +346,12 @@ class FirestoreMethods {
         if (!snap.exists) return;
         final data = snap.data() as Map<String, dynamic>? ?? {};
         final ownerUid = (data["uid"] ?? "").toString();
-        if (ownerUid.isNotEmpty && ownerUid == viewerUid) return;
+        if (ownerUid.isNotEmpty && ownerUid == viewerUid) {
+          final ownerViewed = data["ownerViewed"] == true;
+          if (ownerViewed) return;
+          tx.update(storyRef, {"ownerViewed": true});
+          return;
+        }
         final viewersRaw = data["viewers"];
         final viewers =
             viewersRaw is List
@@ -310,6 +365,57 @@ class FirestoreMethods {
           "viewerCount": currentCount + 1,
         });
       });
+    } catch (e) {
+      if (kDebugMode) {
+        print(e.toString());
+      }
+    }
+  }
+
+  Future<void> markStoriesViewed({
+    required String ownerUid,
+    required String viewerUid,
+  }) async {
+    if (ownerUid.isEmpty || viewerUid.isEmpty) return;
+    try {
+      final snap =
+          await _firestore
+              .collection("stories")
+              .where("uid", isEqualTo: ownerUid)
+              .get();
+      if (snap.docs.isEmpty) return;
+      final now = DateTime.now();
+      final batch = _firestore.batch();
+      for (final doc in snap.docs) {
+        final data = doc.data();
+        final expiresAt = data["expiresAt"];
+        DateTime? expires;
+        if (expiresAt is Timestamp) {
+          expires = expiresAt.toDate();
+        } else if (expiresAt is DateTime) {
+          expires = expiresAt;
+        }
+        if (expires != null && expires.isBefore(now)) {
+          continue;
+        }
+        if (ownerUid == viewerUid) {
+          if (data["ownerViewed"] != true) {
+            batch.update(doc.reference, {"ownerViewed": true});
+          }
+          continue;
+        }
+        final viewersRaw = data["viewers"];
+        final viewers =
+            viewersRaw is List
+                ? viewersRaw.whereType<String>().toList()
+                : <String>[];
+        if (viewers.contains(viewerUid)) continue;
+        batch.update(doc.reference, {
+          "viewers": FieldValue.arrayUnion([viewerUid]),
+          "viewerCount": FieldValue.increment(1),
+        });
+      }
+      await batch.commit();
     } catch (e) {
       if (kDebugMode) {
         print(e.toString());

@@ -19,7 +19,7 @@ class MyElevatedButton extends StatelessWidget {
     required this.onPressed,
     this.bgClr = blueColor,
     this.borderClr = mobileBackgroundColor,
-    this.textClr = primaryColor,
+    this.textClr = Colors.white,
     this.isLoading = false,
     this.height = 50,
     this.width = double.infinity,
@@ -42,7 +42,7 @@ class MyElevatedButton extends StatelessWidget {
           isLoading
               ? Center(
                 child: CircularProgressIndicator(
-                  color: primaryColor,
+                  color: textClr,
                   strokeWidth: 2,
                 ),
               )

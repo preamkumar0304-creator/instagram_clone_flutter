@@ -1,6 +1,9 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:instagram_clone_flutter_firebase/methods/firestore_methods.dart';
+import 'package:instagram_clone_flutter_firebase/responsive/mobile_screen_layout.dart';
+import 'package:instagram_clone_flutter_firebase/responsive/responsive_layout_screen.dart';
+import 'package:instagram_clone_flutter_firebase/responsive/web_screen_layout.dart';
 import 'package:instagram_clone_flutter_firebase/utils/colors.dart';
 import 'package:instagram_clone_flutter_firebase/utils/utils.dart';
 import 'package:video_player/video_player.dart';
@@ -8,11 +11,13 @@ import 'package:video_player/video_player.dart';
 class StoryViewerScreen extends StatefulWidget {
   final String ownerUid;
   final String viewerUid;
+  final bool goHomeOnClose;
 
   const StoryViewerScreen({
     super.key,
     required this.ownerUid,
     required this.viewerUid,
+    this.goHomeOnClose = false,
   });
 
   @override
@@ -39,6 +44,13 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
     return 0;
   }
 
+  List<String> _safeStringList(dynamic value) {
+    if (value is List) {
+      return value.whereType<String>().toList();
+    }
+    return [];
+  }
+
   Stream<QuerySnapshot<Map<String, dynamic>>> _storyStream() {
     return FirebaseFirestore.instance
         .collection("stories")
@@ -61,8 +73,15 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
     return "${diff.inDays}d";
   }
 
+  String _cacheBustUrl(String url, String seed) {
+    if (url.isEmpty) return url;
+    final divider = url.contains("?") ? "&" : "?";
+    return "$url${divider}cache=$seed";
+  }
+
   Future<void> _recordViewIfNeeded(Map<String, dynamic> story) async {
-    final storyId = (story["storyId"] ?? "").toString();
+    final storyId =
+        (story["_docId"] ?? story["storyId"] ?? "").toString();
     if (storyId.isEmpty) return;
     if (_viewedStoryIds.contains(storyId)) return;
     _viewedStoryIds.add(storyId);
@@ -72,24 +91,142 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
     );
   }
 
-  Future<void> _showViewersCount(int count) async {
+  Future<List<Map<String, dynamic>>> _loadViewerUsers(
+    List<String> viewerIds,
+  ) async {
+    if (viewerIds.isEmpty) return [];
+    final usersById = <String, Map<String, dynamic>>{};
+    for (var i = 0; i < viewerIds.length; i += 10) {
+      final chunk = viewerIds.sublist(
+        i,
+        i + 10 > viewerIds.length ? viewerIds.length : i + 10,
+      );
+      final snap =
+          await FirebaseFirestore.instance
+              .collection("users")
+              .where(FieldPath.documentId, whereIn: chunk)
+              .get();
+      for (final doc in snap.docs) {
+        usersById[doc.id] = doc.data();
+      }
+    }
+
+    final results = <Map<String, dynamic>>[];
+    for (final uid in viewerIds) {
+      final data = usersById[uid];
+      if (data == null) continue;
+      results.add({
+        "uid": uid,
+        "username": (data["username"] ?? "").toString(),
+        "photoUrl": (data["photoUrl"] ?? "").toString(),
+      });
+    }
+    return results;
+  }
+
+  Future<void> _showViewersSheet(Map<String, dynamic> story) async {
+    final viewerIds =
+        _safeStringList(story["viewers"])
+            .where((id) => id != widget.ownerUid)
+            .toList();
     await showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       backgroundColor: mobileBackgroundColor,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
       builder: (context) {
         return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
+          child: SizedBox(
+            height: MediaQuery.of(context).size.height * 0.6,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(Icons.remove_red_eye, color: primaryColor),
-                const SizedBox(width: 10),
-                Text(
-                  "Viewed by $count",
-                  style: const TextStyle(color: primaryColor, fontSize: 16),
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.remove_red_eye, color: primaryColor),
+                      const SizedBox(width: 10),
+                      Text(
+                        viewerIds.length.toString(),
+                        style: const TextStyle(
+                          color: primaryColor,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(color: secondaryColor, height: 1),
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(16, 12, 16, 8),
+                  child: Text(
+                    "Who viewed your story",
+                    style: TextStyle(
+                      color: primaryColor,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: FutureBuilder<List<Map<String, dynamic>>>(
+                    future: _loadViewerUsers(viewerIds),
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState ==
+                          ConnectionState.waiting) {
+                        return const Center(
+                          child: CircularProgressIndicator(
+                            color: primaryColor,
+                          ),
+                        );
+                      }
+                      final viewers = snapshot.data ?? [];
+                      if (viewers.isEmpty) {
+                        return const Center(
+                          child: Text(
+                            "No viewers yet.",
+                            style: TextStyle(color: secondaryColor),
+                          ),
+                        );
+                      }
+                      return ListView.separated(
+                        itemCount: viewers.length,
+                        separatorBuilder: (_, __) =>
+                            const Divider(color: secondaryColor, height: 1),
+                        itemBuilder: (context, index) {
+                          final viewer = viewers[index];
+                          final username =
+                              (viewer["username"] ?? "User").toString();
+                          final photoUrl =
+                              (viewer["photoUrl"] ?? "").toString();
+                          return ListTile(
+                            leading: CircleAvatar(
+                              backgroundImage:
+                                  photoUrl.isNotEmpty
+                                      ? NetworkImage(photoUrl)
+                                      : null,
+                              backgroundColor: Colors.grey.shade800,
+                              child:
+                                  photoUrl.isEmpty
+                                      ? const Icon(
+                                        Icons.person,
+                                        color: Colors.white,
+                                      )
+                                      : null,
+                            ),
+                            title: Text(
+                              username,
+                              style: const TextStyle(color: primaryColor),
+                            ),
+                          );
+                        },
+                      );
+                    },
+                  ),
                 ),
               ],
             ),
@@ -167,7 +304,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
                   onTap: () async {
                     Navigator.pop(context);
                     await FirestoreMethods().deleteStory(
-                      (story["storyId"] ?? "").toString(),
+                      (story["_docId"] ?? story["storyId"] ?? "").toString(),
                     );
                     _activeStoryId = "";
                     _progressController.reset();
@@ -252,7 +389,34 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
         curve: Curves.easeInOut,
       );
     } else {
+      _exitStoryViewer();
+    }
+  }
+
+  void _exitStoryViewer() {
+    if (!widget.goHomeOnClose) {
       Navigator.pop(context);
+      return;
+    }
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(
+        builder:
+            (_) => const ResponsiveLayout(
+              webScreenLayout: WebScreenLayout(),
+              mobileScreenLayout: MobileScreenLayout(),
+            ),
+      ),
+      (route) => false,
+    );
+  }
+
+  void _previousStory() {
+    if (_lastStoryCount == 0) return;
+    if (_currentIndex - 1 >= 0) {
+      _pageController.previousPage(
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeInOut,
+      );
     }
   }
 
@@ -273,7 +437,8 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
   }
 
   Future<void> _prepareStory(Map<String, dynamic> story) async {
-    final storyId = (story["storyId"] ?? "").toString();
+    final storyId =
+        (story["_docId"] ?? story["storyId"] ?? "").toString();
     final storyType = (story["storyType"] ?? "image").toString();
     final isVideo = storyType == "video";
     final durationSeconds = _safeInt(story["storyDuration"]);
@@ -346,13 +511,13 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
               return const Center(
                 child: Text(
                   "Unable to load stories",
-                  style: TextStyle(color: primaryColor),
+                  style: TextStyle(color: Colors.white),
                 ),
               );
             }
             if (snapshot.connectionState == ConnectionState.waiting) {
               return const Center(
-                child: CircularProgressIndicator(color: primaryColor),
+                child: CircularProgressIndicator(color: Colors.white),
               );
             }
             final docs = snapshot.data?.docs ?? [];
@@ -367,17 +532,36 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
               return const Center(
                 child: Text(
                   "No stories",
-                  style: TextStyle(color: primaryColor),
+                  style: TextStyle(color: Colors.white),
                 ),
               );
             }
             final now = DateTime.now();
             final stories = <Map<String, dynamic>>[];
-            final seenIds = <String>{};
+            final seenStoryKeys = <String>{};
+            final seenStoryUrls = <String>{};
             for (final doc in docs) {
               final data = doc.data();
-              final id = (data["storyId"] ?? doc.id).toString();
-              if (id.isEmpty || seenIds.contains(id)) continue;
+              final id = doc.id;
+              if (id.isEmpty) continue;
+              final storyId = (data["storyId"] ?? id).toString();
+              final url = (data["storyUrl"] ?? "").toString();
+              final createdRaw = data["createdAt"];
+              DateTime? createdAt;
+              if (createdRaw is Timestamp) {
+                createdAt = createdRaw.toDate();
+              } else if (createdRaw is DateTime) {
+                createdAt = createdRaw;
+              }
+              final key =
+                  storyId.isNotEmpty
+                      ? storyId
+                      : "${url}_${createdAt?.millisecondsSinceEpoch ?? 0}";
+              if (key.isEmpty) continue;
+              if (!seenStoryKeys.add(key)) continue;
+              if (url.isNotEmpty && !seenStoryUrls.add(url)) {
+                continue;
+              }
               final expiresAt = data["expiresAt"];
               DateTime? expires;
               if (expiresAt is Timestamp) {
@@ -388,8 +572,11 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
               if (expires != null && expires.isBefore(now)) {
                 continue;
               }
-              seenIds.add(id);
-              stories.add(data);
+              stories.add({
+                ...data,
+                "storyId": storyId,
+                "_docId": id,
+              });
             }
             stories.sort((a, b) {
               DateTime? aTime;
@@ -422,7 +609,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
               return const Center(
                 child: Text(
                   "No stories",
-                  style: TextStyle(color: primaryColor),
+                  style: TextStyle(color: Colors.white),
                 ),
               );
             }
@@ -442,37 +629,56 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
 
             return Stack(
               children: [
-                PageView.builder(
-                  controller: _pageController,
-                  itemCount: stories.length,
-                  onPageChanged: (index) {
-                    setState(() {
-                      _currentIndex = index;
-                    });
-                    _recordViewIfNeeded(stories[index]);
-                    _prepareStory(stories[index]);
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTapDown: (details) {
+                    final width = MediaQuery.of(context).size.width;
+                    final dx = details.localPosition.dx;
+                    if (dx < width * 0.35) {
+                      _progressController.stop();
+                      _previousStory();
+                      return;
+                    }
+                    _progressController.stop();
+                    _advanceStory();
                   },
-                  itemBuilder: (context, index) {
-                    final story = stories[index];
-                    final url = (story["storyUrl"] ?? "").toString();
-                    final storyType =
-                        (story["storyType"] ?? "image").toString();
+                  child: PageView.builder(
+                    controller: _pageController,
+                    itemCount: stories.length,
+                    onPageChanged: (index) {
+                      setState(() {
+                        _currentIndex = index;
+                      });
+                      _recordViewIfNeeded(stories[index]);
+                      _prepareStory(stories[index]);
+                    },
+                    itemBuilder: (context, index) {
+                      final story = stories[index];
+                      final url = (story["storyUrl"] ?? "").toString();
+                      final storyType =
+                          (story["storyType"] ?? "image").toString();
                     if (storyType == "video") {
                       if (index == _currentIndex &&
                           _videoController != null &&
                           _isVideoReady &&
                           _activeVideoUrl == url) {
                         return FittedBox(
+                          key: ValueKey(
+                            (story["_docId"] ?? story["storyId"] ?? "").toString(),
+                          ),
                           fit: BoxFit.cover,
                           clipBehavior: Clip.hardEdge,
                           child: SizedBox(
                             width: _videoController!.value.size.width,
                             height: _videoController!.value.size.height,
-                            child: VideoPlayer(_videoController!),
-                          ),
-                        );
-                      }
+                              child: VideoPlayer(_videoController!),
+                            ),
+                          );
+                        }
                       return Container(
+                        key: ValueKey(
+                          (story["_docId"] ?? story["storyId"] ?? "").toString(),
+                        ),
                         color: Colors.black,
                         alignment: Alignment.center,
                         child: const Icon(
@@ -482,22 +688,28 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
                         ),
                       );
                     }
+                    final keySeed =
+                        "${story["_docId"] ?? ""}-${story["storyId"] ?? ""}-$url-$index";
+                    final displayUrl = _cacheBustUrl(url, keySeed);
                     return Container(
+                      key: ValueKey(keySeed),
                       color: Colors.black,
                       alignment: Alignment.center,
                       child: url.isEmpty
                           ? const Text(
                               "Story unavailable",
-                              style: TextStyle(color: primaryColor),
+                              style: TextStyle(color: Colors.white),
                             )
                           : Image.network(
-                              url,
+                              key: ValueKey(keySeed),
+                              displayUrl,
                               fit: BoxFit.cover,
                               width: double.infinity,
                               height: double.infinity,
                         ),
                     );
-                  },
+                    },
+                  ),
                 ),
                 Positioned(
                   top: 6,
@@ -538,7 +750,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
                     children: [
                       IconButton(
                         icon: const Icon(Icons.close, color: Colors.white),
-                        onPressed: () => Navigator.pop(context),
+                        onPressed: _exitStoryViewer,
                       ),
                       const SizedBox(width: 4),
                       CircleAvatar(
@@ -606,10 +818,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
                     right: 16,
                     child: GestureDetector(
                       onTap: () {
-                        final count = _safeInt(
-                          stories[_currentIndex]["viewerCount"],
-                        );
-                        _showViewersCount(count);
+                        _showViewersSheet(stories[_currentIndex]);
                       },
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -619,13 +828,20 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
                             color: Colors.white,
                           ),
                           const SizedBox(width: 8),
-                          Text(
-                            _safeInt(stories[_currentIndex]["viewerCount"])
-                                .toString(),
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w600,
-                            ),
+                          Builder(
+                            builder: (context) {
+                              final viewerIds =
+                                  _safeStringList(
+                                    stories[_currentIndex]["viewers"],
+                                  ).where((id) => id != widget.ownerUid).toList();
+                              return Text(
+                                viewerIds.length.toString(),
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              );
+                            },
                           ),
                         ],
                       ),

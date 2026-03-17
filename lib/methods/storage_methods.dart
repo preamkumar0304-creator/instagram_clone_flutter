@@ -13,6 +13,7 @@ class StorageMethods {
     Uint8List file,
     bool isPost, {
     String? contentType,
+    String? fileName,
   }) async {
     if (file.isEmpty) {
       throw FirebaseException(
@@ -32,7 +33,10 @@ class StorageMethods {
     Reference ref = _storage.ref().child(childName).child(user.uid);
 
     if (isPost) {
-      String id = const Uuid().v1();
+      final id =
+          (fileName != null && fileName.isNotEmpty)
+              ? fileName
+              : const Uuid().v1();
       ref = ref.child(id);
     }
 
@@ -63,12 +67,14 @@ class StorageMethods {
   Future<String> uploadImageToStorage(
     String childName,
     Uint8List file,
-    bool isPost,
-  ) async {
+    bool isPost, {
+    String? fileName,
+  }) async {
     return uploadBytesToStorage(
       childName,
       file,
       isPost,
+      fileName: fileName,
       contentType: "image/jpeg",
     );
   }
