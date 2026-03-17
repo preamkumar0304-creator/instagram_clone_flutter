@@ -34,6 +34,9 @@ class MyElevatedButton extends StatelessWidget {
       style: ElevatedButton.styleFrom(
         backgroundColor: bgClr,
         minimumSize: Size(width, height),
+        padding: EdgeInsets.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        visualDensity: VisualDensity.compact,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(radius),
         ),
@@ -48,6 +51,8 @@ class MyElevatedButton extends StatelessWidget {
               )
               : Text(
                 buttonText,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(color: textClr, fontSize: fontSize),
               ),
     );

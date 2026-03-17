@@ -226,10 +226,57 @@ class FirestoreMethods {
   }) async {
     String message = "";
     try {
+      final contentBytes = type == StoryMediaType.video ? videoBytes : imageBytes;
+      if (contentBytes == null || contentBytes.isEmpty) {
+        return "Story file is empty.";
+      }
+      final contentHash = _contentHash(contentBytes);
+      final now = DateTime.now();
+      final recentSnap =
+          await _firestore
+              .collection("stories")
+              .where("uid", isEqualTo: uid)
+              .orderBy("createdAt", descending: true)
+              .limit(20)
+              .get();
+      for (final doc in recentSnap.docs) {
+        final data = doc.data();
+        if ((data["contentHash"] ?? "") == contentHash) {
+          final createdRaw = data["createdAt"];
+          DateTime? createdAt;
+          if (createdRaw is Timestamp) {
+            createdAt = createdRaw.toDate();
+          } else if (createdRaw is DateTime) {
+            createdAt = createdRaw;
+          }
+          if (createdAt != null &&
+              now.difference(createdAt).inHours <= 24) {
+            return "Story already posted.";
+          }
+        }
+      }
+      final bucket =
+          now.millisecondsSinceEpoch ~/ const Duration(minutes: 5).inMilliseconds;
+      final dedupeId = "${uid}_${contentHash}_${bucket}";
+      final existing = await _firestore.collection("stories").doc(dedupeId).get();
+      if (existing.exists) {
+        final data = existing.data() ?? {};
+        final createdRaw = data["createdAt"];
+        DateTime? createdAt;
+        if (createdRaw is Timestamp) {
+          createdAt = createdRaw.toDate();
+        } else if (createdRaw is DateTime) {
+          createdAt = createdRaw;
+        }
+        if (createdAt != null && now.difference(createdAt).inMinutes <= 5) {
+          return "Story already posted.";
+        }
+      }
+
       String storyUrl = "";
       String storyType = "image";
       int storyDuration = 5;
-      final storyId = const Uuid().v1();
+      final storyId = dedupeId;
       final storyRef = _firestore.collection("stories").doc(storyId);
       if (type == StoryMediaType.video) {
         if (videoBytes == null || videoBytes.isEmpty) {
@@ -255,17 +302,18 @@ class FirestoreMethods {
           fileName: storyId,
         );
       }
-      final now = DateTime.now();
+      final createdAt = DateTime.now();
       final data = {
         "storyId": storyId,
         "uid": uid,
         "username": username,
         "photoUrl": profileUrl,
         "storyUrl": storyUrl,
+        "contentHash": contentHash,
         "storyType": storyType,
         "storyDuration": storyDuration,
-        "createdAt": now,
-        "expiresAt": now.add(const Duration(hours: 24)),
+        "createdAt": createdAt,
+        "expiresAt": createdAt.add(const Duration(hours: 24)),
         "viewers": <String>[],
         "viewerCount": 0,
         "ownerViewed": false,
@@ -286,6 +334,15 @@ class FirestoreMethods {
       message = e.toString();
     }
     return message;
+  }
+
+  String _contentHash(Uint8List bytes) {
+    if (bytes.isEmpty) return "0";
+    final len = bytes.length;
+    final first = bytes.first;
+    final mid = bytes[len ~/ 2];
+    final last = bytes.last;
+    return "$len:$first:$mid:$last";
   }
 
   Future<String> uploadReel({

@@ -88,6 +88,128 @@ class FeedScreen extends StatelessWidget {
     return result;
   }
 
+  void _openCreateMenu(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: mobileBackgroundColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 8),
+              const Text(
+                "Create",
+                style: TextStyle(
+                  color: primaryColor,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              ListTile(
+                leading: const Icon(Icons.video_library, color: primaryColor),
+                title: const Text("Reel"),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder:
+                          (_) => const AddPostScreen(
+                            initialCreateType: "reel",
+                          ),
+                    ),
+                  );
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.edit, color: primaryColor),
+                title: const Text("Edits"),
+                onTap: () {
+                  Navigator.pop(context);
+                  showSnackBar(
+                    context: context,
+                    content: "Edits coming soon.",
+                    clr: secondaryColor,
+                  );
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.grid_on, color: primaryColor),
+                title: const Text("Post"),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder:
+                          (_) => const AddPostScreen(
+                            initialCreateType: "post",
+                          ),
+                    ),
+                  );
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.auto_awesome, color: primaryColor),
+                title: const Text("Story"),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder:
+                          (_) => const AddPostScreen(
+                            initialCreateType: "story",
+                          ),
+                    ),
+                  );
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.star_border, color: primaryColor),
+                title: const Text("Highlights"),
+                onTap: () {
+                  Navigator.pop(context);
+                  showSnackBar(
+                    context: context,
+                    content: "Highlights coming soon.",
+                    clr: secondaryColor,
+                  );
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.wifi_tethering, color: primaryColor),
+                title: const Text("Live"),
+                onTap: () {
+                  Navigator.pop(context);
+                  showSnackBar(
+                    context: context,
+                    content: "Live coming soon.",
+                    clr: secondaryColor,
+                  );
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.auto_awesome, color: primaryColor),
+                title: const Text("AI"),
+                onTap: () {
+                  Navigator.pop(context);
+                  showSnackBar(
+                    context: context,
+                    content: "AI tools coming soon.",
+                    clr: secondaryColor,
+                  );
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final user = Provider.of<UserProvider>(context).getUser;
@@ -131,11 +253,7 @@ class FeedScreen extends StatelessWidget {
                   ),
                   IconButton(
                     onPressed: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => const AddPostScreen(),
-                        ),
-                      );
+                      _openCreateMenu(context);
                     },
                     icon: const Icon(
                       Icons.add_box_outlined,
@@ -374,7 +492,14 @@ class _StoriesRowState extends State<_StoriesRow> {
       });
     }
 
-    return results;
+    final uniqueByUid = <String, Map<String, dynamic>>{};
+    for (final item in results) {
+      final uid = (item["uid"] ?? "").toString();
+      if (uid.isEmpty) continue;
+      uniqueByUid.putIfAbsent(uid, () => item);
+    }
+
+    return uniqueByUid.values.toList();
   }
 
   Future<void> _pickStoryFromGallery() async {

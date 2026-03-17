@@ -61,12 +61,29 @@ class _StoryComposeScreenState extends State<StoryComposeScreen> {
   @override
   void initState() {
     super.initState();
-    _items = widget.items.where((item) {
+    final filtered = widget.items.where((item) {
       if (item.type == StoryMediaType.image) {
         return item.bytes != null && item.bytes!.isNotEmpty;
       }
       return item.path != null && item.path!.isNotEmpty;
     }).toList();
+    final seenKeys = <String>{};
+    _items =
+        filtered.where((item) {
+          if (item.type == StoryMediaType.video) {
+            final path = item.path ?? "";
+            if (path.isEmpty) return false;
+            return seenKeys.add("v:$path");
+          }
+          final bytes = item.bytes!;
+          final len = bytes.length;
+          if (len == 0) return false;
+          final first = bytes.first;
+          final mid = bytes[len ~/ 2];
+          final last = bytes.last;
+          final key = "i:$len:$first:$mid:$last";
+          return seenKeys.add(key);
+        }).toList();
     _pageController = PageController();
   }
 

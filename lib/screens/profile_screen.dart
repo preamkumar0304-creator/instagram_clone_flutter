@@ -14,11 +14,13 @@ import 'package:instagram_clone_flutter_firebase/screens/profile_photo_view.dart
 import 'package:instagram_clone_flutter_firebase/screens/saved_screen.dart';
 import 'package:instagram_clone_flutter_firebase/screens/story_viewer_screen.dart';
 import 'package:instagram_clone_flutter_firebase/screens/add_post_screen.dart';
+import 'package:instagram_clone_flutter_firebase/screens/account_type_tools_screen.dart';
 import 'package:instagram_clone_flutter_firebase/utils/colors.dart';
 import 'package:instagram_clone_flutter_firebase/utils/utils.dart';
 import 'package:instagram_clone_flutter_firebase/widgets/elevated_button.dart';
 import 'package:instagram_clone_flutter_firebase/widgets/share_profile_sheet.dart';
 import 'package:instagram_clone_flutter_firebase/widgets/text.dart';
+import 'package:instagram_clone_flutter_firebase/screens/settings_screen.dart';
 import 'package:provider/provider.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -43,6 +45,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _hasActiveStory = false;
   bool _hasUnseenStory = false;
   bool _markedStoriesViewed = false;
+  int _recentImpressions = 0;
+  int _recentReach = 0;
+  static const int _dashboardReachThreshold = 1000;
 
   String _safeString(dynamic value) {
     if (value == null) return "";
@@ -54,6 +59,149 @@ class _ProfileScreenState extends State<ProfileScreen> {
       return value.whereType<String>().toList();
     }
     return [];
+  }
+
+  int _safeInt(dynamic value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return 0;
+  }
+
+  bool get _isProfessionalAccount {
+    return _safeString(userData["accountType"]) == "professional";
+  }
+
+  Widget _buildProfileActions(bool isOwner) {
+    final isProfessional = _isProfessionalAccount;
+    final buttons = <Widget>[];
+
+    if (isOwner) {
+      buttons.add(
+        Expanded(
+          child: MyElevatedButton(
+            buttonText: "Edit profile",
+            onPressed: () {},
+            bgClr: secondaryColor.shade700,
+            radius: 5,
+            height: 35,
+            fontSize: 14,
+          ),
+        ),
+      );
+      buttons.add(const SizedBox(width: 5));
+      buttons.add(
+        Expanded(
+          child: MyElevatedButton(
+            buttonText: "Share profile",
+            onPressed: _shareProfile,
+            bgClr: secondaryColor.shade700,
+            radius: 5,
+            height: 35,
+            fontSize: 14,
+          ),
+        ),
+      );
+      if (isProfessional) {
+        buttons.add(const SizedBox(width: 5));
+        buttons.add(
+          Expanded(
+            child: MyElevatedButton(
+              buttonText: "Contact",
+              onPressed: () => _showContactInfo(isOwner: true),
+              bgClr: secondaryColor.shade700,
+              radius: 5,
+              height: 35,
+              fontSize: 14,
+            ),
+          ),
+        );
+      }
+    } else {
+      buttons.add(
+        Expanded(
+          child:
+              isFollowing
+                  ? MyElevatedButton(
+                    buttonText: "Unfollow",
+                    onPressed: () async {
+                      await FirestoreMethods().followUser(
+                        uid: FirebaseAuth.instance.currentUser!.uid,
+                        followId: userData["uid"],
+                      );
+                      setState(() {
+                        isFollowing = false;
+                        followers--;
+                        final list = _safeStringList(userData["followers"]);
+                        list.remove(FirebaseAuth.instance.currentUser!.uid);
+                        userData["followers"] = list;
+                      });
+                    },
+                    textClr: Colors.black,
+                    bgClr: Colors.grey.shade200,
+                    radius: 5,
+                    height: 35,
+                    fontSize: 14,
+                  )
+                  : MyElevatedButton(
+                    buttonText: "Follow",
+                    onPressed: () async {
+                      await FirestoreMethods().followUser(
+                        uid: FirebaseAuth.instance.currentUser!.uid,
+                        followId: userData["uid"],
+                      );
+                      setState(() {
+                        isFollowing = true;
+                        followers++;
+                        final list = _safeStringList(userData["followers"]);
+                        list.add(FirebaseAuth.instance.currentUser!.uid);
+                        userData["followers"] = list;
+                      });
+                    },
+                    textClr: Colors.white,
+                    bgClr: blueColor,
+                    radius: 5,
+                    height: 35,
+                    fontSize: 14,
+                  ),
+        ),
+      );
+      buttons.add(const SizedBox(width: 5));
+      buttons.add(
+        Expanded(
+          child: MyElevatedButton(
+            buttonText: "Message",
+            onPressed: () {},
+            bgClr: secondaryColor.shade700,
+            radius: 5,
+            height: 35,
+            fontSize: 14,
+          ),
+        ),
+      );
+      if (isProfessional) {
+        buttons.add(const SizedBox(width: 5));
+        buttons.add(
+          Expanded(
+            child: MyElevatedButton(
+              buttonText: "Contact",
+              onPressed: () => _showContactInfo(isOwner: false),
+              bgClr: secondaryColor.shade700,
+              radius: 5,
+              height: 35,
+              fontSize: 14,
+            ),
+          ),
+        );
+      }
+    }
+
+    return SizedBox(
+      height: 35,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: buttons,
+      ),
+    );
   }
 
   @override
@@ -162,8 +310,29 @@ class _ProfileScreenState extends State<ProfileScreen> {
           .where("uid", isEqualTo: widget.uid)
           .get();
 
+      final since = DateTime.now().subtract(const Duration(days: 30));
+      int impressions = 0;
+      int reach = 0;
+      for (final doc in postSnap.docs) {
+        final data = doc.data();
+        final postedAt = data["postedDate"];
+        DateTime? postedDate;
+        if (postedAt is Timestamp) {
+          postedDate = postedAt.toDate();
+        } else if (postedAt is DateTime) {
+          postedDate = postedAt;
+        }
+        if (postedDate == null || postedDate.isBefore(since)) {
+          continue;
+        }
+        impressions += _safeInt(data["impressions"]);
+        reach += _safeInt(data["reach"]);
+      }
+
       setState(() {
         postLength = postSnap.docs.length;
+        _recentImpressions = impressions;
+        _recentReach = reach;
       });
     } catch (err) {
       if (mounted) {
@@ -287,6 +456,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   void _showProfileMenu() {
+    final isOwner = FirebaseAuth.instance.currentUser?.uid == widget.uid;
     showModalBottomSheet(
       context: context,
       backgroundColor: mobileBackgroundColor,
@@ -298,10 +468,32 @@ class _ProfileScreenState extends State<ProfileScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              if (isOwner)
+                ListTile(
+                  leading: const Icon(
+                    Icons.manage_accounts,
+                    color: primaryColor,
+                  ),
+                  title: const Text("Account type and tools"),
+                  onTap: () {
+                    Navigator.pop(context);
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder:
+                            (_) => AccountTypeToolsScreen(uid: widget.uid),
+                      ),
+                    );
+                  },
+                ),
               ListTile(
                 leading: const Icon(Icons.settings, color: primaryColor),
                 title: const Text("Settings"),
-                onTap: () => Navigator.pop(context),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                  );
+                },
               ),
               ListTile(
                 leading: const Icon(Icons.bookmark_border, color: primaryColor),
@@ -333,6 +525,175 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 },
               ),
             ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showContactInfo({required bool isOwner}) {
+    final email = _safeString(userData["email"]);
+    final phone = _safeString(userData["phoneNumber"]);
+    final allowPhoneShare = userData["allowPhoneShare"] == true;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: mobileBackgroundColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.email, color: primaryColor),
+                title: const Text("Email"),
+                subtitle: Text(email.isEmpty ? "Not available" : email),
+              ),
+              ListTile(
+                leading: const Icon(Icons.phone, color: primaryColor),
+                title: const Text("Mobile number"),
+                subtitle: Text(
+                  allowPhoneShare && phone.isNotEmpty
+                      ? phone
+                      : "Not shared",
+                ),
+              ),
+              if (!isOwner && (!allowPhoneShare || phone.isEmpty))
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        showSnackBar(
+                          context: context,
+                          content: "Request sent for mobile number.",
+                          clr: secondaryColor,
+                        );
+                      },
+                      child: const Text("Request mobile number"),
+                    ),
+                  ),
+                ),
+              if (isOwner)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: blueColor,
+                        foregroundColor: Colors.white,
+                      ),
+                      onPressed: () {
+                        Navigator.pop(context);
+                        _openContactEditor();
+                      },
+                      child: const Text("Edit contact info"),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _openContactEditor() {
+    final controller = TextEditingController(
+      text: _safeString(userData["phoneNumber"]),
+    );
+    bool allowShare = userData["allowPhoneShare"] == true;
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: mobileBackgroundColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) {
+        return Padding(
+          padding: EdgeInsets.only(
+            left: 16,
+            right: 16,
+            top: 16,
+            bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+          ),
+          child: StatefulBuilder(
+            builder: (context, setModalState) {
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    "Contact info",
+                    style: TextStyle(
+                      color: primaryColor,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 18,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: controller,
+                    keyboardType: TextInputType.phone,
+                    decoration: InputDecoration(
+                      hintText: "Mobile number",
+                      filled: true,
+                      fillColor: mobileSearchColor,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text("Share mobile number"),
+                    value: allowShare,
+                    onChanged: (value) {
+                      setModalState(() {
+                        allowShare = value;
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: blueColor,
+                        foregroundColor: Colors.white,
+                      ),
+                      onPressed: () async {
+                        final phone = controller.text.trim();
+                        final share = phone.isNotEmpty && allowShare;
+                        await FirebaseFirestore.instance
+                            .collection("users")
+                            .doc(widget.uid)
+                            .update({
+                              "phoneNumber": phone,
+                              "allowPhoneShare": share,
+                            });
+                        if (mounted) {
+                          Navigator.pop(context);
+                          showSnackBar(
+                            context: context,
+                            content: "Contact info updated.",
+                            clr: successColor,
+                          );
+                        }
+                      },
+                      child: const Text("Save"),
+                    ),
+                  ),
+                ],
+              );
+            },
           ),
         );
       },
@@ -373,8 +734,124 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   void _openCreateFromProfile() {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const AddPostScreen()),
+    _openCreateMenuFromProfile();
+  }
+
+  void _openCreateMenuFromProfile() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: mobileBackgroundColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 8),
+              const Text(
+                "Create",
+                style: TextStyle(
+                  color: primaryColor,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              ListTile(
+                leading: const Icon(Icons.video_library, color: primaryColor),
+                title: const Text("Reel"),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder:
+                          (_) => const AddPostScreen(
+                            initialCreateType: "reel",
+                          ),
+                    ),
+                  );
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.edit, color: primaryColor),
+                title: const Text("Edits"),
+                onTap: () {
+                  Navigator.pop(context);
+                  showSnackBar(
+                    context: context,
+                    content: "Edits coming soon.",
+                    clr: secondaryColor,
+                  );
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.grid_on, color: primaryColor),
+                title: const Text("Post"),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder:
+                          (_) => const AddPostScreen(
+                            initialCreateType: "post",
+                          ),
+                    ),
+                  );
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.auto_awesome, color: primaryColor),
+                title: const Text("Story"),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder:
+                          (_) => const AddPostScreen(
+                            initialCreateType: "story",
+                          ),
+                    ),
+                  );
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.star_border, color: primaryColor),
+                title: const Text("Highlights"),
+                onTap: () {
+                  Navigator.pop(context);
+                  _openHighlights();
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.wifi_tethering, color: primaryColor),
+                title: const Text("Live"),
+                onTap: () {
+                  Navigator.pop(context);
+                  showSnackBar(
+                    context: context,
+                    content: "Live coming soon.",
+                    clr: secondaryColor,
+                  );
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.auto_awesome, color: primaryColor),
+                title: const Text("AI"),
+                onTap: () {
+                  Navigator.pop(context);
+                  showSnackBar(
+                    context: context,
+                    content: "AI tools coming soon.",
+                    clr: secondaryColor,
+                  );
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -581,7 +1058,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
           actions: [
             IconButton(
-              icon: const Icon(Icons.menu, color: Colors.white),
+              icon: const Icon(Icons.menu, color: primaryColor),
               onPressed: _showProfileMenu,
             ),
           ],
@@ -652,8 +1129,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ),
                         if (isOwner)
                           Positioned(
-                            right: 4,
-                            bottom: 4,
+                            right: 2,
+                            bottom: 2,
                             child: GestureDetector(
                               onTap: _openCreateFromProfile,
                               child: Container(
@@ -752,99 +1229,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   textSize: 14,
                 ),
               ),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  Expanded(
-                    child: isOwner
-                        ? MyElevatedButton(
-                            buttonText: "Edit profile",
-                            onPressed: () {},
-                            bgClr: secondaryColor.shade700,
-                            radius: 5,
-                            height: 35,
-                            fontSize: 14,
-                          )
-                        : isFollowing
-                            ? MyElevatedButton(
-                                buttonText: "Unfollow",
-                                onPressed: () async {
-                                  await FirestoreMethods().followUser(
-                                    uid: FirebaseAuth
-                                        .instance
-                                        .currentUser!
-                                        .uid,
-                                    followId: userData["uid"],
-                                  );
-                                  setState(() {
-                                    isFollowing = false;
-                                    followers--;
-                                    final list =
-                                        _safeStringList(userData["followers"]);
-                                    list.remove(FirebaseAuth
-                                        .instance
-                                        .currentUser!
-                                        .uid);
-                                    userData["followers"] = list;
-                                  });
-                                },
-                                textClr: Colors.black,
-                                bgClr: Colors.grey.shade200,
-                                radius: 5,
-                                height: 35,
-                                fontSize: 14,
-                              )
-                            : MyElevatedButton(
-                                buttonText: "Follow",
-                                onPressed: () async {
-                                  await FirestoreMethods().followUser(
-                                    uid: FirebaseAuth
-                                        .instance
-                                        .currentUser!
-                                        .uid,
-                                    followId: userData["uid"],
-                                  );
-                                  setState(() {
-                                    isFollowing = true;
-                                    followers++;
-                                    final list =
-                                        _safeStringList(userData["followers"]);
-                                    list.add(FirebaseAuth
-                                        .instance
-                                        .currentUser!
-                                        .uid);
-                                    userData["followers"] = list;
-                                  });
-                                },
-                                textClr: Colors.white,
-                                bgClr: blueColor,
-                                radius: 5,
-                                height: 35,
-                                fontSize: 14,
-                              ),
+              if (_isProfessionalAccount &&
+                  _recentReach >= _dashboardReachThreshold)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: _ProfessionalDashboard(
+                    impressions: _recentImpressions,
+                    reach: _recentReach,
+                    onInsightsTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const SettingsScreen(openInsights: true),
+                        ),
+                      );
+                    },
                   ),
-                  const SizedBox(width: 5),
-                  Expanded(
-                    child: isOwner
-                        ? MyElevatedButton(
-                            buttonText: "Share profile",
-                            onPressed: _shareProfile,
-                            bgClr: secondaryColor.shade700,
-                            radius: 5,
-                            height: 35,
-                            fontSize: 14,
-                          )
-                        : MyElevatedButton(
-                            buttonText: "Message",
-                            onPressed: () {},
-                            bgClr: secondaryColor.shade700,
-                            radius: 5,
-                            height: 35,
-                            fontSize: 14,
-                          ),
-                  ),
-                ],
-              ),
+                ),
+              _buildProfileActions(isOwner),
               const SizedBox(height: 8),
               _buildHighlightsRow(isOwner),
               const SizedBox(height: 10),
@@ -927,21 +1328,23 @@ class _PostsGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder(
-      future: FirebaseFirestore.instance
-          .collection("posts")
-          .where("uid", isEqualTo: uid)
-          .orderBy("postedDate", descending: true)
-          .get(),
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream:
+          FirebaseFirestore.instance
+              .collection("posts")
+              .where("uid", isEqualTo: uid)
+              .orderBy("postedDate", descending: true)
+              .snapshots(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(
             child: CircularProgressIndicator(color: primaryColor),
           );
         }
+        final docs = snapshot.data?.docs ?? [];
         return GridView.builder(
           shrinkWrap: true,
-          itemCount: (snapshot.data! as dynamic).docs.length,
+          itemCount: docs.length,
           gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: 3,
             crossAxisSpacing: 5,
@@ -949,7 +1352,7 @@ class _PostsGrid extends StatelessWidget {
             childAspectRatio: 1,
           ),
           itemBuilder: (context, index) {
-            DocumentSnapshot snap = (snapshot.data! as dynamic).docs[index];
+            final snap = docs[index];
             final postUrl = snap["postUrl"];
             if (postUrl is! String || postUrl.isEmpty) {
               return const SizedBox.shrink();
@@ -984,6 +1387,118 @@ class _PlaceholderTab extends StatelessWidget {
   Widget build(BuildContext context) {
     return Center(
       child: Text(label, style: const TextStyle(color: primaryColor)),
+    );
+  }
+}
+
+class _ProfessionalDashboard extends StatelessWidget {
+  final int impressions;
+  final int reach;
+  final VoidCallback onInsightsTap;
+
+  const _ProfessionalDashboard({
+    required this.impressions,
+    required this.reach,
+    required this.onInsightsTap,
+  });
+
+  String _formatCompact(int value) {
+    if (value >= 1000000) {
+      return "${(value / 1000000).toStringAsFixed(1)}M";
+    }
+    if (value >= 1000) {
+      return "${(value / 1000).toStringAsFixed(1)}K";
+    }
+    return value.toString();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade200,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            "Professional dashboard",
+            style: TextStyle(
+              color: primaryColor,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            "${_formatCompact(impressions)} views in the last 30 days",
+            style: const TextStyle(color: secondaryColor),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: _MetricTile(
+                  label: "Reach",
+                  value: _formatCompact(reach),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _MetricTile(
+                  label: "Views",
+                  value: _formatCompact(impressions),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton(
+              onPressed: onInsightsTap,
+              child: const Text("Insights"),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MetricTile extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _MetricTile({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: secondaryColor.withOpacity(0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            value,
+            style: const TextStyle(
+              color: primaryColor,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            label,
+            style: const TextStyle(color: secondaryColor, fontSize: 12),
+          ),
+        ],
+      ),
     );
   }
 }

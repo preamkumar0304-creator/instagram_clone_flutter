@@ -39,6 +39,12 @@ class AuthMethods {
       "followers": [],
       "following": [],
       "savedPosts": [],
+      "accountType": "personal",
+      "isPublic": false,
+      "professionalCategory": "",
+      "professionalType": "",
+      "phoneNumber": "",
+      "allowPhoneShare": false,
     });
   }
 
@@ -160,6 +166,12 @@ class AuthMethods {
         followers: [],
         following: [],
         savedPosts: [],
+        accountType: "personal",
+        isPublic: false,
+        professionalCategory: "",
+        professionalType: "",
+        phoneNumber: "",
+        allowPhoneShare: false,
       );
 
       // 🔹 Store in Firestore

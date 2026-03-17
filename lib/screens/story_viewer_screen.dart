@@ -37,6 +37,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
   String _activeStoryId = "";
   String _activeVideoUrl = "";
   bool _isVideoReady = false;
+  bool _isHolding = false;
 
   int _safeInt(dynamic value) {
     if (value is int) return value;
@@ -381,6 +382,23 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
     _progressController.forward();
   }
 
+  void _pauseStory() {
+    _progressController.stop();
+    if (_videoController != null && _isVideoReady) {
+      _videoController!.pause();
+    }
+  }
+
+  void _resumeStory() {
+    if (_progressController.value >= 1.0) return;
+    if (_videoController != null && _isVideoReady) {
+      _videoController!.play();
+    }
+    if (!_progressController.isAnimating) {
+      _progressController.forward();
+    }
+  }
+
   void _advanceStory() {
     if (_lastStoryCount == 0) return;
     if (_currentIndex + 1 < _lastStoryCount) {
@@ -540,12 +558,15 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
             final stories = <Map<String, dynamic>>[];
             final seenStoryKeys = <String>{};
             final seenStoryUrls = <String>{};
+            final seenContentHashes = <String>{};
+            final seenTimesByType = <String, List<DateTime>>{};
             for (final doc in docs) {
               final data = doc.data();
               final id = doc.id;
               if (id.isEmpty) continue;
               final storyId = (data["storyId"] ?? id).toString();
               final url = (data["storyUrl"] ?? "").toString();
+              final contentHash = (data["contentHash"] ?? "").toString();
               final createdRaw = data["createdAt"];
               DateTime? createdAt;
               if (createdRaw is Timestamp) {
@@ -561,6 +582,21 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
               if (!seenStoryKeys.add(key)) continue;
               if (url.isNotEmpty && !seenStoryUrls.add(url)) {
                 continue;
+              }
+              if (contentHash.isNotEmpty &&
+                  !seenContentHashes.add(contentHash)) {
+                continue;
+              }
+              if (contentHash.isEmpty && createdAt != null) {
+                final typeKey = (data["storyType"] ?? "image").toString();
+                final list = seenTimesByType.putIfAbsent(typeKey, () => []);
+                final isDup = list.any(
+                  (t) => (createdAt!.difference(t).inSeconds).abs() <= 3,
+                );
+                if (isDup) {
+                  continue;
+                }
+                list.add(createdAt);
               }
               final expiresAt = data["expiresAt"];
               DateTime? expires;
@@ -631,15 +667,28 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
               children: [
                 GestureDetector(
                   behavior: HitTestBehavior.opaque,
-                  onTapDown: (details) {
+                  onLongPressStart: (_) {
+                    _isHolding = true;
+                    _pauseStory();
+                  },
+                  onLongPressEnd: (_) {
+                    _isHolding = false;
+                    _resumeStory();
+                  },
+                  onLongPressCancel: () {
+                    _isHolding = false;
+                    _resumeStory();
+                  },
+                  onTapUp: (details) {
+                    if (_isHolding) return;
                     final width = MediaQuery.of(context).size.width;
                     final dx = details.localPosition.dx;
                     if (dx < width * 0.35) {
-                      _progressController.stop();
+                      _pauseStory();
                       _previousStory();
                       return;
                     }
-                    _progressController.stop();
+                    _pauseStory();
                     _advanceStory();
                   },
                   child: PageView.builder(

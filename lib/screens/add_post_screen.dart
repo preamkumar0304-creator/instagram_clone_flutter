@@ -56,6 +56,11 @@ class _AddPostScreenState extends State<AddPostScreen> {
   _AlbumOption? _currentAlbum;
   List<AssetEntity> _assets = [];
   AssetEntity? _selectedAsset;
+  final ScrollController _gridController = ScrollController();
+  int _assetPage = 0;
+  static const int _pageSize = 200;
+  bool _hasMoreAssets = true;
+  bool _isLoadingMoreAssets = false;
 
   void _goHome() {
     Navigator.of(context).pushAndRemoveUntil(
@@ -254,7 +259,8 @@ class _AddPostScreenState extends State<AddPostScreen> {
 
   Future<void> _initGallery() async {
     final permission = await PhotoManager.requestPermissionExtend();
-    if (!permission.isAuth) {
+    final isGranted = permission.isAuth || permission.isLimited;
+    if (!isGranted) {
       if (mounted) {
         setState(() {
           _hasGalleryPermission = false;
@@ -263,21 +269,33 @@ class _AddPostScreenState extends State<AddPostScreen> {
       }
       return;
     }
+    if (mounted) {
+      setState(() {
+        _hasGalleryPermission = true;
+      });
+    }
 
+    final orderOption =
+        FilterOptionGroup(orders: [
+          const OrderOption(type: OrderOptionType.createDate, asc: false),
+        ]);
     final allAlbums =
         await PhotoManager.getAssetPathList(
           type: RequestType.all,
           hasAll: true,
+          filterOption: orderOption,
         );
     final imageAlbums =
         await PhotoManager.getAssetPathList(
           type: RequestType.image,
           hasAll: true,
+          filterOption: orderOption,
         );
     final videoAlbums =
         await PhotoManager.getAssetPathList(
           type: RequestType.video,
           hasAll: true,
+          filterOption: orderOption,
         );
 
     final options = <_AlbumOption>[];
@@ -302,7 +320,14 @@ class _AddPostScreenState extends State<AddPostScreen> {
     });
 
     if (options.isNotEmpty) {
-      await _setAlbum(options.first);
+      _AlbumOption selected = options.first;
+      if (_createType == "reel") {
+        final videoOption = options.where((o) => o.label == "Videos").toList();
+        if (videoOption.isNotEmpty) {
+          selected = videoOption.first;
+        }
+      }
+      await _setAlbum(selected);
     } else {
       setState(() {
         _isLoadingAssets = false;
@@ -314,14 +339,49 @@ class _AddPostScreenState extends State<AddPostScreen> {
     setState(() {
       _currentAlbum = option;
       _isLoadingAssets = true;
+      _assets = [];
+      _selectedAsset = null;
+      _assetPage = 0;
+      _hasMoreAssets = true;
     });
-    final assets = await option.album.getAssetListPaged(page: 0, size: 200);
+    await _loadMoreAssets();
+  }
+
+  Future<void> _loadMoreAssets() async {
+    if (_currentAlbum == null) return;
+    if (_isLoadingMoreAssets || !_hasMoreAssets) return;
+    setState(() {
+      _isLoadingMoreAssets = true;
+    });
+    final assets =
+        await _currentAlbum!.album.getAssetListPaged(
+          page: _assetPage,
+          size: _pageSize,
+        );
     if (!mounted) return;
     setState(() {
-      _assets = assets;
-      _selectedAsset ??= assets.isNotEmpty ? assets.first : null;
+      _assets.addAll(assets);
+      if (_selectedAsset == null || !_matchesCreateType(_selectedAsset!)) {
+        final matches = _assets.where(_matchesCreateType).toList();
+        _selectedAsset = matches.isNotEmpty ? matches.first : null;
+      }
       _isLoadingAssets = false;
+      _isLoadingMoreAssets = false;
+      _assetPage += 1;
+      if (assets.length < _pageSize) {
+        _hasMoreAssets = false;
+      }
     });
+  }
+
+  bool _matchesCreateType(AssetEntity asset) {
+    if (_createType == "reel") {
+      return asset.type == AssetType.video;
+    }
+    if (_createType == "post") {
+      return asset.type == AssetType.image;
+    }
+    return true;
   }
 
   Future<void> _openAlbumPicker() async {
@@ -530,6 +590,13 @@ class _AddPostScreenState extends State<AddPostScreen> {
     });
   }
 
+  Future<void> _openSettingsAndReload() async {
+    await PhotoManager.openSetting();
+    if (!mounted) return;
+    await Future.delayed(const Duration(milliseconds: 300));
+    await _initGallery();
+  }
+
   Future<void> _handleNextFromPicker() async {
     if (_selectedAsset == null) {
       showSnackBar(
@@ -724,7 +791,12 @@ class _AddPostScreenState extends State<AddPostScreen> {
         if (source == ImageSource.gallery) {
           final images = await picker.pickMultiImage();
           if (images.isEmpty) return;
+          final seenPaths = <String>{};
           for (final image in images) {
+            final path = image.path;
+            if (path.isNotEmpty && !seenPaths.add(path)) {
+              continue;
+            }
             final bytes = await image.readAsBytes();
             if (bytes.isEmpty) continue;
             items.add(StoryMediaItem.image(bytes));
@@ -816,21 +888,33 @@ class _AddPostScreenState extends State<AddPostScreen> {
   @override
   void initState() {
     super.initState();
+    _gridController.addListener(() {
+      if (!_gridController.hasClients) return;
+      final maxScroll = _gridController.position.maxScrollExtent;
+      final current = _gridController.position.pixels;
+      if (current >= maxScroll - 400) {
+        _loadMoreAssets();
+      }
+    });
     if (widget.initialFile != null) {
       _file = widget.initialFile;
       _createMenuShown = true;
-    } else if (widget.autoPick && widget.initialCreateType != null) {
-      _createType = widget.initialCreateType!;
-      _createMenuShown = true;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _pickFromSource(widget.initialSource ?? ImageSource.gallery);
-      });
     } else {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (_createMenuShown) return;
+      if (widget.initialCreateType != null) {
+        _createType = widget.initialCreateType!;
+      }
+      if (widget.autoPick && widget.initialCreateType != null) {
         _createMenuShown = true;
-        _initGallery();
-      });
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _pickFromSource(widget.initialSource ?? ImageSource.gallery);
+        });
+      } else {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (_createMenuShown) return;
+          _createMenuShown = true;
+          _initGallery();
+        });
+      }
     }
   }
 
@@ -840,6 +924,7 @@ class _AddPostScreenState extends State<AddPostScreen> {
     captionController.dispose();
     locationController.dispose();
     _locationFocus.dispose();
+    _gridController.dispose();
   }
 
   Future<void> _setCurrentLocation() async {
@@ -1007,7 +1092,7 @@ class _AddPostScreenState extends State<AddPostScreen> {
       return Center(
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
-          onTap: _openSystemGalleryFallback,
+          onTap: _initGallery,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -1020,9 +1105,7 @@ class _AddPostScreenState extends State<AddPostScreen> {
                 width: 160,
                 height: 44,
                 child: ElevatedButton(
-                  onPressed: () {
-                    PhotoManager.openSetting();
-                  },
+                  onPressed: _openSettingsAndReload,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: blueColor,
                     shape: RoundedRectangleBorder(
@@ -1059,8 +1142,29 @@ class _AddPostScreenState extends State<AddPostScreen> {
       );
     }
 
+    final isStory = _createType == "story";
+    final isReel = _createType == "reel";
+
     return Column(
       children: [
+        if (isStory)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+            child: Row(
+              children: const [
+                _StoryToolChip(
+                  icon: Icons.collections_bookmark,
+                  label: "Templates",
+                ),
+                SizedBox(width: 10),
+                _StoryToolChip(icon: Icons.music_note, label: "Music"),
+                SizedBox(width: 10),
+                _StoryToolChip(icon: Icons.grid_on, label: "Collage"),
+                SizedBox(width: 10),
+                _StoryToolChip(icon: Icons.auto_awesome, label: "AI Images"),
+              ],
+            ),
+          ),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
           child: Row(
@@ -1095,94 +1199,132 @@ class _AddPostScreenState extends State<AddPostScreen> {
                   color: Colors.white12,
                   borderRadius: BorderRadius.circular(18),
                 ),
-                child: const Text(
-                  "Select",
-                  style: TextStyle(color: Colors.white70),
+                child: Row(
+                  children: const [
+                    Icon(Icons.check_box_outline_blank, color: Colors.white70, size: 16),
+                    SizedBox(width: 6),
+                    Text(
+                      "Select",
+                      style: TextStyle(color: Colors.white70),
+                    ),
+                  ],
                 ),
               ),
             ],
           ),
         ),
         Expanded(
-          child: GridView.builder(
-            padding: EdgeInsets.zero,
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 4,
-              crossAxisSpacing: 1,
-              mainAxisSpacing: 1,
-            ),
-            itemCount: _assets.length + 1,
-            itemBuilder: (context, index) {
-              if (index == 0) {
-                return InkWell(
-                  onTap: _openCameraFromPicker,
-                  child: Container(
-                    color: Colors.black87,
-                    child: const Center(
-                      child: Icon(
-                        Icons.photo_camera,
-                        color: Colors.white,
-                        size: 32,
-                      ),
-                    ),
-                  ),
-                );
-              }
-              final asset = _assets[index - 1];
-              final isSelected = _selectedAsset?.id == asset.id;
-              return GestureDetector(
-                onTap: () {
+          child: Builder(
+            builder: (context) {
+              final visibleAssets =
+                  _assets.where(_matchesCreateType).toList();
+              if (_selectedAsset != null &&
+                  !_matchesCreateType(_selectedAsset!)) {
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (!mounted) return;
                   setState(() {
-                    _selectedAsset = asset;
+                    _selectedAsset =
+                        visibleAssets.isNotEmpty ? visibleAssets.first : null;
                   });
-                },
-                child: Stack(
-                  children: [
-                    Positioned.fill(
-                      child: AssetEntityImage(
-                        asset,
-                        isOriginal: false,
-                        fit: BoxFit.cover,
-                      ),
-                    ),
-                    if (asset.type == AssetType.video)
-                      Positioned(
-                        right: 6,
-                        bottom: 6,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.black54,
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: const Icon(
-                            Icons.play_arrow,
-                            color: Colors.white,
-                            size: 14,
-                          ),
-                        ),
-                      ),
-                    if (isSelected)
-                      Positioned.fill(
-                        child: Container(
-                          decoration: BoxDecoration(
-                            border: Border.all(color: blueColor, width: 2),
-                          ),
-                        ),
-                      ),
-                  ],
+                });
+              }
+              return GridView.builder(
+                controller: _gridController,
+                padding: EdgeInsets.zero,
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 4,
+                  crossAxisSpacing: 1,
+                  mainAxisSpacing: 1,
                 ),
+                itemCount: visibleAssets.length + 1,
+                itemBuilder: (context, index) {
+                  if (index == 0) {
+                    return InkWell(
+                      onTap: _openCameraFromPicker,
+                      child: Container(
+                        color: Colors.white,
+                        child: const Center(
+                          child: Icon(
+                            Icons.photo_camera,
+                            color: Colors.black,
+                            size: 32,
+                          ),
+                        ),
+                      ),
+                    );
+                  }
+                  final asset = visibleAssets[index - 1];
+                  final isSelected = _selectedAsset?.id == asset.id;
+                  return GestureDetector(
+                    onTap: () {
+                      setState(() {
+                        _selectedAsset = asset;
+                      });
+                    },
+                    child: Stack(
+                      children: [
+                        Positioned.fill(
+                          child: AssetEntityImage(
+                            asset,
+                            isOriginal: false,
+                            fit: BoxFit.cover,
+                          ),
+                        ),
+                        if (asset.type == AssetType.video)
+                          Positioned(
+                            right: 6,
+                            bottom: 6,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.black54,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: const Icon(
+                                Icons.play_arrow,
+                                color: Colors.white,
+                                size: 14,
+                              ),
+                            ),
+                          ),
+                        if (isSelected)
+                          Positioned.fill(
+                            child: Container(
+                              decoration: BoxDecoration(
+                                border: Border.all(color: blueColor, width: 2),
+                              ),
+                            ),
+                          ),
+                        if (_isLoadingMoreAssets &&
+                            index == visibleAssets.length)
+                          const Positioned(
+                            right: 6,
+                            top: 6,
+                            child: SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  );
+                },
               );
             },
           ),
         ),
-        Padding(
-          padding: const EdgeInsets.only(bottom: 16, top: 10),
-          child: _buildCreateTypeSelector(Colors.white),
-        ),
+        if (!isStory && !isReel)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 16, top: 10),
+            child: _buildCreateTypeSelector(Colors.white),
+          ),
       ],
     );
   }
@@ -1218,7 +1360,11 @@ class _AddPostScreenState extends State<AddPostScreen> {
             },
           ),
           title: Text(
-            "New post",
+            _createType == "story"
+                ? "Add to story"
+                : _createType == "reel"
+                    ? "New reel"
+                    : "New post",
             style: TextStyle(
               color: isPickerMode ? Colors.white : primaryColor,
               fontWeight: FontWeight.w600,
@@ -1478,4 +1624,33 @@ class _AlbumOption {
   final AssetPathEntity album;
 
   const _AlbumOption({required this.label, required this.album});
+}
+
+class _StoryToolChip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+
+  const _StoryToolChip({required this.icon, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.white12,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: Colors.white, size: 22),
+          const SizedBox(height: 6),
+          Text(
+            label,
+            style: const TextStyle(color: Colors.white, fontSize: 11),
+          ),
+        ],
+      ),
+    );
+  }
 }

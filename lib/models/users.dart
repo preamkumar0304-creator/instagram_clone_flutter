@@ -10,6 +10,12 @@ class UserModel {
   final List followers;
   final List following;
   final List savedPosts;
+  final String accountType;
+  final bool isPublic;
+  final String professionalCategory;
+  final String professionalType;
+  final String phoneNumber;
+  final bool allowPhoneShare;
 
   const UserModel({
     required this.uid,
@@ -21,6 +27,12 @@ class UserModel {
     required this.followers,
     required this.following,
     required this.savedPosts,
+    required this.accountType,
+    required this.isPublic,
+    required this.professionalCategory,
+    required this.professionalType,
+    required this.phoneNumber,
+    required this.allowPhoneShare,
   });
 
   // Convert to Map (for saving to Firestore)
@@ -34,6 +46,12 @@ class UserModel {
         "followers": followers,
         "following": following,
         "savedPosts": savedPosts,
+        "accountType": accountType,
+        "isPublic": isPublic,
+        "professionalCategory": professionalCategory,
+        "professionalType": professionalType,
+        "phoneNumber": phoneNumber,
+        "allowPhoneShare": allowPhoneShare,
       };
 
   // ✅ Safe factory method with null checks
@@ -57,6 +75,12 @@ class UserModel {
       followers: snapshot["followers"] ?? [],
       following: snapshot["following"] ?? [],
       savedPosts: snapshot["savedPosts"] ?? [],
+      accountType: snapshot["accountType"] ?? "personal",
+      isPublic: snapshot["isPublic"] == true,
+      professionalCategory: snapshot["professionalCategory"] ?? "",
+      professionalType: snapshot["professionalType"] ?? "",
+      phoneNumber: snapshot["phoneNumber"] ?? "",
+      allowPhoneShare: snapshot["allowPhoneShare"] == true,
     );
   }
 }
