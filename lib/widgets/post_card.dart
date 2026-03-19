@@ -5,6 +5,7 @@ import 'package:instagram_clone_flutter_firebase/providers/user_provider.dart';
 import 'package:instagram_clone_flutter_firebase/screens/image_viewer_screen.dart';
 import 'package:instagram_clone_flutter_firebase/screens/profile_screen.dart';
 import 'package:instagram_clone_flutter_firebase/utils/colors.dart';
+import 'package:instagram_clone_flutter_firebase/utils/utils.dart';
 import 'package:instagram_clone_flutter_firebase/widgets/comments_bottom_sheet.dart';
 import 'package:instagram_clone_flutter_firebase/widgets/like_animation.dart';
 import 'package:instagram_clone_flutter_firebase/widgets/share_post_sheet.dart';
@@ -155,6 +156,77 @@ class _PostCardState extends State<PostCard> {
     if (url.isEmpty) return;
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => ImageViewerScreen(imageUrl: url)),
+    );
+  }
+
+  Future<void> _hideUserPosts(String ownerUid) async {
+    final user = Provider.of<UserProvider>(context, listen: false).getUser;
+    if (user == null || ownerUid.isEmpty || user.uid == ownerUid) return;
+    await FirestoreMethods().muteUser(uid: user.uid, targetUid: ownerUid);
+    if (context.mounted) {
+      await Provider.of<UserProvider>(context, listen: false).refreshUser();
+      showSnackBar(
+        context: context,
+        content: "We'll show fewer posts like this.",
+        clr: secondaryColor,
+      );
+    }
+  }
+
+  void _showReportSheet() {
+    final reasons = [
+      "It's spam",
+      "Nudity or sexual activity",
+      "Hate speech or symbols",
+      "Violence or dangerous organizations",
+      "Bullying or harassment",
+      "Scam or fraud",
+      "False information",
+      "Something else",
+    ];
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: mobileBackgroundColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) {
+        return SafeArea(
+          child: ListView.separated(
+            shrinkWrap: true,
+            itemCount: reasons.length + 1,
+            separatorBuilder: (_, __) =>
+                const Divider(color: secondaryColor, height: 1),
+            itemBuilder: (context, index) {
+              if (index == 0) {
+                return const Padding(
+                  padding: EdgeInsets.fromLTRB(16, 12, 16, 8),
+                  child: Text(
+                    "Why are you reporting this ad?",
+                    style: TextStyle(
+                      color: primaryColor,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 16,
+                    ),
+                  ),
+                );
+              }
+              final reason = reasons[index - 1];
+              return ListTile(
+                title: Text(reason, style: const TextStyle(color: primaryColor)),
+                onTap: () {
+                  Navigator.pop(context);
+                  showSnackBar(
+                    context: context,
+                    content: "Thanks for letting us know. We'll review it.",
+                    clr: secondaryColor,
+                  );
+                },
+              );
+            },
+          ),
+        );
+      },
     );
   }
 
@@ -328,14 +400,7 @@ class _PostCardState extends State<PostCard> {
                               ),
                               onPressed: () {
                                 Navigator.of(context).pop();
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text(
-                                      "We’ll show you fewer posts like this.",
-                                    ),
-                                    behavior: SnackBarBehavior.floating,
-                                  ),
-                                );
+                                _hideUserPosts(ownerUid);
                               },
                             ),
                             SimpleDialogOption(
@@ -351,7 +416,7 @@ class _PostCardState extends State<PostCard> {
                                   ),
                                   SizedBox(width: 10),
                                   Text(
-                                    "Report Post",
+                                    "Report Ad",
                                     style: TextStyle(
                                       color: Colors.redAccent,
                                       fontWeight: FontWeight.w500,
@@ -362,14 +427,7 @@ class _PostCardState extends State<PostCard> {
                               ),
                               onPressed: () {
                                 Navigator.of(context).pop();
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text(
-                                      "Thank you. Our team will review this post.",
-                                    ),
-                                    behavior: SnackBarBehavior.floating,
-                                  ),
-                                );
+                                _showReportSheet();
                               },
                             ),
                           ],

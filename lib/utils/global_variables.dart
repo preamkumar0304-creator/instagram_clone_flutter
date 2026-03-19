@@ -11,8 +11,8 @@ final ValueNotifier<int> storyRefreshNotifier = ValueNotifier<int>(0);
 
 List<Widget> homeScreenItems(String uid) => [
   FeedScreen(),
-  SearchScreen(),
-  const MessagesScreen(),
   const ReelsScreen(),
+  const MessagesScreen(),
+  SearchScreen(),
   ProfileScreen(uid: uid),
 ];

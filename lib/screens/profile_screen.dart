@@ -15,6 +15,8 @@ import 'package:instagram_clone_flutter_firebase/screens/saved_screen.dart';
 import 'package:instagram_clone_flutter_firebase/screens/story_viewer_screen.dart';
 import 'package:instagram_clone_flutter_firebase/screens/add_post_screen.dart';
 import 'package:instagram_clone_flutter_firebase/screens/account_type_tools_screen.dart';
+import 'package:instagram_clone_flutter_firebase/screens/edit_profile_screen.dart';
+import 'package:instagram_clone_flutter_firebase/screens/live_broadcast_screen.dart';
 import 'package:instagram_clone_flutter_firebase/utils/colors.dart';
 import 'package:instagram_clone_flutter_firebase/utils/utils.dart';
 import 'package:instagram_clone_flutter_firebase/widgets/elevated_button.dart';
@@ -38,6 +40,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   int followers = 0;
   int following = 0;
   bool isFollowing = false;
+  bool isRequested = false;
   bool isLoading = true;
   bool isUploadingPhoto = false;
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _userSub;
@@ -80,8 +83,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
         Expanded(
           child: MyElevatedButton(
             buttonText: "Edit profile",
-            onPressed: () {},
-            bgClr: secondaryColor.shade700,
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder:
+                      (_) => EditProfileScreen(
+                        uid: widget.uid,
+                        initialName: _safeString(userData["name"]),
+                        initialUsername: _safeString(userData["username"]),
+                        initialPronouns: _safeString(userData["pronouns"]),
+                        initialBio: _safeString(userData["bio"]),
+                        initialGender: _safeString(userData["gender"]),
+                        initialPhotoUrl: _safeString(userData["photoUrl"]),
+                      ),
+                ),
+              );
+            },
+            bgClr: secondaryColor,
             radius: 5,
             height: 35,
             fontSize: 14,
@@ -94,7 +112,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           child: MyElevatedButton(
             buttonText: "Share profile",
             onPressed: _shareProfile,
-            bgClr: secondaryColor.shade700,
+            bgClr: secondaryColor,
             radius: 5,
             height: 35,
             fontSize: 14,
@@ -108,7 +126,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             child: MyElevatedButton(
               buttonText: "Contact",
               onPressed: () => _showContactInfo(isOwner: true),
-              bgClr: secondaryColor.shade700,
+              bgClr: secondaryColor,
               radius: 5,
               height: 35,
               fontSize: 14,
@@ -117,6 +135,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
         );
       }
     } else {
+      final isPublic = userData["isPublic"] == true;
+      final currentUid = FirebaseAuth.instance.currentUser!.uid;
       buttons.add(
         Expanded(
           child:
@@ -125,14 +145,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     buttonText: "Unfollow",
                     onPressed: () async {
                       await FirestoreMethods().followUser(
-                        uid: FirebaseAuth.instance.currentUser!.uid,
+                        uid: currentUid,
                         followId: userData["uid"],
                       );
                       setState(() {
                         isFollowing = false;
                         followers--;
                         final list = _safeStringList(userData["followers"]);
-                        list.remove(FirebaseAuth.instance.currentUser!.uid);
+                        list.remove(currentUid);
                         userData["followers"] = list;
                       });
                     },
@@ -142,27 +162,49 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     height: 35,
                     fontSize: 14,
                   )
-                  : MyElevatedButton(
-                    buttonText: "Follow",
-                    onPressed: () async {
-                      await FirestoreMethods().followUser(
-                        uid: FirebaseAuth.instance.currentUser!.uid,
-                        followId: userData["uid"],
-                      );
-                      setState(() {
-                        isFollowing = true;
-                        followers++;
-                        final list = _safeStringList(userData["followers"]);
-                        list.add(FirebaseAuth.instance.currentUser!.uid);
-                        userData["followers"] = list;
-                      });
-                    },
-                    textClr: Colors.white,
-                    bgClr: blueColor,
-                    radius: 5,
-                    height: 35,
-                    fontSize: 14,
-                  ),
+                  : isRequested
+                      ? MyElevatedButton(
+                        buttonText: "Requested",
+                        onPressed: () async {
+                          await FirestoreMethods().followUser(
+                            uid: currentUid,
+                            followId: userData["uid"],
+                          );
+                          setState(() {
+                            isRequested = false;
+                          });
+                        },
+                        textClr: Colors.black,
+                        bgClr: Colors.grey.shade200,
+                        radius: 5,
+                        height: 35,
+                        fontSize: 14,
+                      )
+                      : MyElevatedButton(
+                        buttonText: "Follow",
+                        onPressed: () async {
+                          await FirestoreMethods().followUser(
+                            uid: currentUid,
+                            followId: userData["uid"],
+                          );
+                          setState(() {
+                            if (isPublic) {
+                              isFollowing = true;
+                              followers++;
+                              final list = _safeStringList(userData["followers"]);
+                              list.add(currentUid);
+                              userData["followers"] = list;
+                            } else {
+                              isRequested = true;
+                            }
+                          });
+                        },
+                        textClr: Colors.white,
+                        bgClr: blueColor,
+                        radius: 5,
+                        height: 35,
+                        fontSize: 14,
+                      ),
         ),
       );
       buttons.add(const SizedBox(width: 5));
@@ -171,7 +213,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           child: MyElevatedButton(
             buttonText: "Message",
             onPressed: () {},
-            bgClr: secondaryColor.shade700,
+            bgClr: secondaryColor,
             radius: 5,
             height: 35,
             fontSize: 14,
@@ -185,7 +227,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             child: MyElevatedButton(
               buttonText: "Contact",
               onPressed: () => _showContactInfo(isOwner: false),
-              bgClr: secondaryColor.shade700,
+              bgClr: secondaryColor,
               radius: 5,
               height: 35,
               fontSize: 14,
@@ -225,13 +267,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
       }
       final followersList = _safeStringList(data["followers"]);
       final followingList = _safeStringList(data["following"]);
+      final requestList = _safeStringList(data["followRequests"]);
+      final currentUid = FirebaseAuth.instance.currentUser?.uid ?? "";
+      final isPublic = data["isPublic"] == true;
       setState(() {
         userData = data;
         followers = followersList.length;
         following = followingList.length;
-        isFollowing = followersList.contains(
-          FirebaseAuth.instance.currentUser!.uid,
-        );
+        isFollowing = currentUid.isNotEmpty && followersList.contains(currentUid);
+        isRequested =
+            !isPublic && currentUid.isNotEmpty && requestList.contains(currentUid);
         isLoading = false;
       });
     });
@@ -828,10 +873,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 title: const Text("Live"),
                 onTap: () {
                   Navigator.pop(context);
-                  showSnackBar(
-                    context: context,
-                    content: "Live coming soon.",
-                    clr: secondaryColor,
+                  final currentUser =
+                      Provider.of<UserProvider>(context, listen: false).getUser;
+                  if (currentUser == null) {
+                    showSnackBar(
+                      context: context,
+                      content: "Loading your profile, please try again.",
+                      clr: secondaryColor,
+                    );
+                    return;
+                  }
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => LiveBroadcastScreen(user: currentUser),
+                    ),
                   );
                 },
               ),
@@ -1087,10 +1142,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 _hasActiveStory && _hasUnseenStory
                                     ? const LinearGradient(
                                       colors: [
-                                        Color(0xFFF58529),
-                                        Color(0xFFDD2A7B),
-                                        Color(0xFF8134AF),
-                                        Color(0xFF515BD4),
+                                        Color(0xFF2C2C2C),
+                                        Color(0xFF5A5A5A),
+                                        Color(0xFF8A8A8A),
+                                        Color(0xFFBDBDBD),
                                       ],
                                       begin: Alignment.topLeft,
                                       end: Alignment.bottomRight,
@@ -1223,10 +1278,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
               Padding(
                 padding: const EdgeInsets.only(top: 5, bottom: 5),
-                child: MyText(
-                  text: _safeString(userData["bio"]),
-                  textClr: primaryColor,
-                  textSize: 14,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (_safeString(userData["name"]).isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 2),
+                        child: MyText(
+                          text: _safeString(userData["name"]),
+                          textClr: primaryColor,
+                          textSize: 14,
+                          textWeight: FontWeight.bold,
+                        ),
+                      ),
+                    MyText(
+                      text: _safeString(userData["bio"]),
+                      textClr: primaryColor,
+                      textSize: 14,
+                    ),
+                  ],
                 ),
               ),
               if (_isProfessionalAccount &&

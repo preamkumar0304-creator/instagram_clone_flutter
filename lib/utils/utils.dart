@@ -15,6 +15,7 @@ void showSnackBar({
   required String content,
   Color clr = Colors.red,
 }) {
+  if (!context.mounted) return;
   ScaffoldMessenger.of(context).showSnackBar(
     SnackBar(
       content: Center(

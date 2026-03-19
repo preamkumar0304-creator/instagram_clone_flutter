@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:instagram_clone_flutter_firebase/screens/insights_screen.dart';
+import 'package:instagram_clone_flutter_firebase/screens/privacy_settings_screen.dart';
 import 'package:instagram_clone_flutter_firebase/utils/colors.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -79,10 +80,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         : null,
               ),
               const Divider(height: 1),
-              const ListTile(
-                leading: Icon(Icons.lock_outline, color: primaryColor),
-                title: Text("Privacy"),
-                subtitle: Text("Manage who can see your content"),
+              ListTile(
+                leading: const Icon(Icons.lock_outline, color: primaryColor),
+                title: const Text("Privacy"),
+                subtitle: const Text("Manage who can see your content"),
+                trailing: const Icon(Icons.chevron_right, color: secondaryColor),
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const PrivacySettingsScreen(),
+                    ),
+                  );
+                },
               ),
               const Divider(height: 1),
               const ListTile(

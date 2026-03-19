@@ -4,12 +4,19 @@ class UserModel {
   final String uid;
   final String email;
   final String photoUrl;
+  final String name;
   final String username;
   final String bio;
+  final String pronouns;
   final String gender;
   final List followers;
   final List following;
+  final List followRequests;
+  final Map<String, dynamic> followerTimes;
+  final Map<String, dynamic> followRequestTimes;
   final List savedPosts;
+  final List blockedUsers;
+  final List mutedUsers;
   final String accountType;
   final bool isPublic;
   final String professionalCategory;
@@ -21,12 +28,19 @@ class UserModel {
     required this.uid,
     required this.email,
     required this.photoUrl,
+    required this.name,
     required this.username,
     required this.bio,
+    required this.pronouns,
     required this.gender,
     required this.followers,
     required this.following,
+    required this.followRequests,
+    required this.followerTimes,
+    required this.followRequestTimes,
     required this.savedPosts,
+    required this.blockedUsers,
+    required this.mutedUsers,
     required this.accountType,
     required this.isPublic,
     required this.professionalCategory,
@@ -40,12 +54,19 @@ class UserModel {
         "uid": uid,
         "email": email,
         "photoUrl": photoUrl,
+        "name": name,
         "username": username,
         "bio": bio,
+        "pronouns": pronouns,
         "gender": gender,
         "followers": followers,
         "following": following,
+        "followRequests": followRequests,
+        "followerTimes": followerTimes,
+        "followRequestTimes": followRequestTimes,
         "savedPosts": savedPosts,
+        "blockedUsers": blockedUsers,
+        "mutedUsers": mutedUsers,
         "accountType": accountType,
         "isPublic": isPublic,
         "professionalCategory": professionalCategory,
@@ -69,12 +90,25 @@ class UserModel {
       uid: snapshot["uid"] ?? '',
       email: snapshot["email"] ?? '',
       photoUrl: snapshot["photoUrl"] ?? '',
+      name: snapshot["name"] ?? '',
       username: snapshot["username"] ?? '',
       bio: snapshot["bio"] ?? '',
+      pronouns: snapshot["pronouns"] ?? '',
       gender: snapshot["gender"] ?? 'unspecified',
       followers: snapshot["followers"] ?? [],
       following: snapshot["following"] ?? [],
+      followRequests: snapshot["followRequests"] ?? [],
+      followerTimes:
+          snapshot["followerTimes"] is Map
+              ? Map<String, dynamic>.from(snapshot["followerTimes"])
+              : {},
+      followRequestTimes:
+          snapshot["followRequestTimes"] is Map
+              ? Map<String, dynamic>.from(snapshot["followRequestTimes"])
+              : {},
       savedPosts: snapshot["savedPosts"] ?? [],
+      blockedUsers: snapshot["blockedUsers"] ?? [],
+      mutedUsers: snapshot["mutedUsers"] ?? [],
       accountType: snapshot["accountType"] ?? "personal",
       isPublic: snapshot["isPublic"] == true,
       professionalCategory: snapshot["professionalCategory"] ?? "",

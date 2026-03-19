@@ -8,6 +8,9 @@ class BoostReviewScreen extends StatefulWidget {
   final int days;
   final int interval;
   final int maxInsertions;
+  final int? packageAmount;
+  final String? packageTitle;
+  final String? packageSubtitle;
 
   const BoostReviewScreen({
     super.key,
@@ -16,6 +19,9 @@ class BoostReviewScreen extends StatefulWidget {
     required this.days,
     required this.interval,
     required this.maxInsertions,
+    this.packageAmount,
+    this.packageTitle,
+    this.packageSubtitle,
   });
 
   @override
@@ -23,11 +29,22 @@ class BoostReviewScreen extends StatefulWidget {
 }
 
 class _BoostReviewScreenState extends State<BoostReviewScreen> {
-  String _goal = "More messages";
+  String _goal = "Visit your profile";
   String _audience = "Near you";
   int _dailyBudget = 174;
   int _durationDays = 1;
   bool _financialAd = false;
+  bool _budgetEdited = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _durationDays = widget.days;
+    if (widget.packageAmount != null) {
+      final candidate = widget.packageAmount!.clamp(100, 5000);
+      _dailyBudget = candidate;
+    }
+  }
 
   Future<void> _editGoal() async {
     final selected = await Navigator.of(context).push<String>(
@@ -69,6 +86,7 @@ class _BoostReviewScreenState extends State<BoostReviewScreen> {
       setState(() {
         _dailyBudget = selected.dailyBudget;
         _durationDays = selected.durationDays;
+        _budgetEdited = true;
       });
     }
   }
@@ -104,6 +122,15 @@ class _BoostReviewScreenState extends State<BoostReviewScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final packageTitle = widget.packageTitle ?? "";
+    final packageSubtitle = widget.packageSubtitle ?? "";
+    final totalBudget =
+        _budgetEdited
+            ? _dailyBudget * _durationDays
+            : (widget.packageAmount ?? (_dailyBudget * _durationDays));
+    final estimatedGst = totalBudget * 0.18;
+    final totalPayable = totalBudget + estimatedGst;
+
     return Scaffold(
       backgroundColor: mobileBackgroundColor,
       appBar: AppBar(
@@ -120,7 +147,7 @@ class _BoostReviewScreenState extends State<BoostReviewScreen> {
           _SectionTile(
             title: "Goal",
             subtitle:
-                "More messages to\nOutcome: Conversations\nAction Button: Chat on WhatsApp",
+                "$_goal\nTap to change your goal",
             onTap: _editGoal,
           ),
           const SizedBox(height: 4),
@@ -173,7 +200,11 @@ class _BoostReviewScreenState extends State<BoostReviewScreen> {
           const SizedBox(height: 12),
           _SectionTile(
             title: "Budget and duration",
-            subtitle: "\u20b9$_dailyBudget over $_durationDays day",
+            subtitle:
+                !_budgetEdited && packageTitle.isNotEmpty
+                    ? packageTitle +
+                        (packageSubtitle.isNotEmpty ? "\n$packageSubtitle" : "")
+                    : "\u20b9$_dailyBudget over $_durationDays day",
             onTap: _editBudget,
           ),
           const SizedBox(height: 12),
@@ -225,12 +256,18 @@ class _BoostReviewScreenState extends State<BoostReviewScreen> {
             style: TextStyle(color: primaryColor, fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 8),
-          _SummaryRow(label: "Ad budget", value: "\u20b9 174"),
-          _SummaryRow(label: "Estimated GST", value: "\u20b9 31.32"),
+          _SummaryRow(
+            label: "Ad budget",
+            value: "\u20b9 ${totalBudget.toStringAsFixed(2)}",
+          ),
+          _SummaryRow(
+            label: "Estimated GST",
+            value: "\u20b9 ${estimatedGst.toStringAsFixed(2)}",
+          ),
           const Divider(color: Colors.black12),
           _SummaryRow(
             label: "Total",
-            value: "\u20b9 205.32",
+            value: "\u20b9 ${totalPayable.toStringAsFixed(2)}",
             bold: true,
           ),
           const SizedBox(height: 20),

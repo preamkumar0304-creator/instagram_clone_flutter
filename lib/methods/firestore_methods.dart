@@ -164,28 +164,89 @@ class FirestoreMethods {
     required String followId,
   }) async {
     try {
-      DocumentSnapshot snap =
+      if (uid.isEmpty || followId.isEmpty || uid == followId) return;
+      final currentSnap =
           await FirebaseFirestore.instance.collection("users").doc(uid).get();
-      final data = (snap.data() as Map<String, dynamic>?) ?? {};
-      List following = List.from(data["following"] ?? []);
-      if (following.contains(followId)) {
+      final targetSnap =
+          await FirebaseFirestore.instance
+              .collection("users")
+              .doc(followId)
+              .get();
+      final currentData = (currentSnap.data() as Map<String, dynamic>?) ?? {};
+      final targetData = (targetSnap.data() as Map<String, dynamic>?) ?? {};
+      final following = List<String>.from(currentData["following"] ?? []);
+      final isFollowing = following.contains(followId);
+      if (isFollowing) {
         await _firestore.collection("users").doc(followId).update({
           "followers": FieldValue.arrayRemove([uid]),
+          "followerTimes.$uid": FieldValue.delete(),
         });
         await _firestore.collection("users").doc(uid).update({
           "following": FieldValue.arrayRemove([followId]),
         });
-      } else {
+        return;
+      }
+
+      final isPublic = targetData["isPublic"] == true;
+      if (isPublic) {
         await _firestore.collection("users").doc(followId).update({
           "followers": FieldValue.arrayUnion([uid]),
+          "followerTimes.$uid": DateTime.now(),
+          "followRequests": FieldValue.arrayRemove([uid]),
+          "followRequestTimes.$uid": FieldValue.delete(),
         });
         await _firestore.collection("users").doc(uid).update({
           "following": FieldValue.arrayUnion([followId]),
+        });
+        return;
+      }
+
+      final requests = List<String>.from(targetData["followRequests"] ?? []);
+      if (requests.contains(uid)) {
+        await _firestore.collection("users").doc(followId).update({
+          "followRequests": FieldValue.arrayRemove([uid]),
+          "followRequestTimes.$uid": FieldValue.delete(),
+        });
+      } else {
+        await _firestore.collection("users").doc(followId).update({
+          "followRequests": FieldValue.arrayUnion([uid]),
+          "followRequestTimes.$uid": DateTime.now(),
         });
       }
     } catch (e) {
       e.toString();
     }
+  }
+
+  Future<void> acceptFollowRequest({
+    required String currentUid,
+    required String requesterUid,
+  }) async {
+    if (currentUid.isEmpty || requesterUid.isEmpty) return;
+    final batch = _firestore.batch();
+    final currentRef = _firestore.collection("users").doc(currentUid);
+    final requesterRef = _firestore.collection("users").doc(requesterUid);
+    batch.update(currentRef, {
+      "followers": FieldValue.arrayUnion([requesterUid]),
+      "followRequests": FieldValue.arrayRemove([requesterUid]),
+      "followerTimes.$requesterUid": DateTime.now(),
+      "followRequestTimes.$requesterUid": FieldValue.delete(),
+    });
+    batch.update(requesterRef, {
+      "following": FieldValue.arrayUnion([currentUid]),
+    });
+    await batch.commit();
+  }
+
+  Future<void> declineFollowRequest({
+    required String currentUid,
+    required String requesterUid,
+  }) async {
+    if (currentUid.isEmpty || requesterUid.isEmpty) return;
+    await _firestore.collection("users").doc(currentUid).update({
+      "followRequests": FieldValue.arrayRemove([requesterUid]),
+      "followRequestTimes.$requesterUid": FieldValue.delete(),
+    });
   }
 
   Future<void> toggleSavePost({
@@ -672,6 +733,22 @@ class FirestoreMethods {
     try {
       await _firestore.collection("posts").doc(postId).update({
         "profileVisits": FieldValue.increment(1),
+      });
+    } catch (e) {
+      if (kDebugMode) {
+        print(e.toString());
+      }
+    }
+  }
+
+  Future<void> muteUser({
+    required String uid,
+    required String targetUid,
+  }) async {
+    if (uid.isEmpty || targetUid.isEmpty || uid == targetUid) return;
+    try {
+      await _firestore.collection("users").doc(uid).update({
+        "mutedUsers": FieldValue.arrayUnion([targetUid]),
       });
     } catch (e) {
       if (kDebugMode) {

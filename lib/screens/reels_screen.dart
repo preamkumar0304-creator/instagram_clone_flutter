@@ -16,10 +16,17 @@ class ReelsScreen extends StatelessWidget {
       backgroundColor: mobileBackgroundColor,
       appBar: AppBar(
         backgroundColor: mobileBackgroundColor,
-        title: const Text("Reels", style: TextStyle(color: primaryColor)),
+        title: const Text(
+          "Reels",
+          style: TextStyle(color: primaryColor, fontWeight: FontWeight.w600),
+        ),
       ),
       body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-        stream: FirebaseFirestore.instance.collection("reels").snapshots(),
+        stream:
+            FirebaseFirestore.instance
+                .collection("reels")
+                .orderBy("createdAt", descending: true)
+                .snapshots(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(
@@ -35,10 +42,9 @@ class ReelsScreen extends StatelessWidget {
               ),
             );
           }
-          return ListView.separated(
+          return ListView.builder(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
             itemCount: docs.length,
-            separatorBuilder: (_, __) =>
-                const Divider(color: secondaryColor, height: 1),
             itemBuilder: (context, index) {
               final data = docs[index].data();
               final title = _safeString(data["title"]);
@@ -47,37 +53,124 @@ class ReelsScreen extends StatelessWidget {
                   _safeString(data["coverUrl"]).isNotEmpty
                       ? _safeString(data["coverUrl"])
                       : _safeString(data["thumbnailUrl"]);
-              return ListTile(
-                leading: Container(
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    color: Colors.grey.shade800,
-                    borderRadius: BorderRadius.circular(8),
-                    image:
-                        coverUrl.isNotEmpty
-                            ? DecorationImage(
-                              image: NetworkImage(coverUrl),
-                              fit: BoxFit.cover,
-                            )
-                            : null,
-                  ),
-                  child:
-                      coverUrl.isEmpty
-                          ? const Icon(Icons.movie, color: Colors.white)
-                          : null,
+              return Container(
+                margin: const EdgeInsets.only(bottom: 14),
+                height: 220,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: Colors.grey.shade300),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.05),
+                      blurRadius: 10,
+                      offset: const Offset(0, 6),
+                    ),
+                  ],
                 ),
-                title: Text(
-                  title.isNotEmpty ? title : "Reel",
-                  style: const TextStyle(color: primaryColor),
-                ),
-                subtitle:
-                    username.isNotEmpty
-                        ? Text(
-                          username,
-                          style: const TextStyle(color: secondaryColor),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(18),
+                  child: Stack(
+                    children: [
+                      if (coverUrl.isNotEmpty)
+                        Positioned.fill(
+                          child: Image.network(
+                            coverUrl,
+                            fit: BoxFit.cover,
+                          ),
                         )
-                        : null,
+                      else
+                        Positioned.fill(
+                          child: Container(
+                            color: Colors.grey.shade200,
+                            child: const Icon(
+                              Icons.movie,
+                              color: secondaryColor,
+                              size: 40,
+                            ),
+                          ),
+                        ),
+                      Positioned.fill(
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [
+                                Colors.transparent,
+                                Colors.white.withOpacity(0.9),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      if (index < 3)
+                        Positioned(
+                          top: 12,
+                          left: 12,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.black,
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: const Text(
+                              "TRENDING",
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 11,
+                              ),
+                            ),
+                          ),
+                        ),
+                      Positioned(
+                        right: 12,
+                        top: 12,
+                        child: Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: Colors.white70,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Icon(
+                            Icons.play_arrow,
+                            color: Colors.black,
+                            size: 20,
+                          ),
+                        ),
+                      ),
+                      Positioned(
+                        left: 12,
+                        right: 12,
+                        bottom: 12,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              title.isNotEmpty ? title : "Reel",
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.black,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              username.isNotEmpty ? "@$username" : "Creator",
+                              style: const TextStyle(color: secondaryColor),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               );
             },
           );

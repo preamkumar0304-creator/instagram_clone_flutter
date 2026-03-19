@@ -12,6 +12,7 @@ import 'package:instagram_clone_flutter_firebase/responsive/mobile_screen_layout
 import 'package:instagram_clone_flutter_firebase/responsive/responsive_layout_screen.dart';
 import 'package:instagram_clone_flutter_firebase/responsive/web_screen_layout.dart';
 import 'package:instagram_clone_flutter_firebase/screens/story_compose_screen.dart';
+import 'package:instagram_clone_flutter_firebase/screens/live_broadcast_screen.dart';
 import 'package:instagram_clone_flutter_firebase/utils/colors.dart';
 import 'package:instagram_clone_flutter_firebase/utils/utils.dart';
 import 'package:instagram_clone_flutter_firebase/widgets/text.dart';
@@ -216,11 +217,24 @@ class _AddPostScreenState extends State<AddPostScreen> {
                   title: const Text("Reel"),
                   onTap: () => Navigator.pop(context, "reel"),
                 ),
+                ListTile(
+                  leading: const Icon(Icons.wifi_tethering, color: primaryColor),
+                  title: const Text("Live"),
+                  onTap: () => Navigator.pop(context, "live"),
+                ),
               ],
             ),
           ),
     );
     if (!mounted || type == null) return;
+    if (type == "live") {
+      final user = Provider.of<UserProvider>(context, listen: false).getUser;
+      if (user == null) return;
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => LiveBroadcastScreen(user: user)),
+      );
+      return;
+    }
     _createType = type;
 
     final source = await showModalBottomSheet<ImageSource>(

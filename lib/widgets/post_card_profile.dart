@@ -5,6 +5,7 @@ import 'package:instagram_clone_flutter_firebase/providers/user_provider.dart';
 import 'package:instagram_clone_flutter_firebase/screens/image_viewer_screen.dart';
 import 'package:instagram_clone_flutter_firebase/screens/boost_review_screen.dart';
 import 'package:instagram_clone_flutter_firebase/utils/colors.dart';
+import 'package:instagram_clone_flutter_firebase/utils/utils.dart';
 import 'package:instagram_clone_flutter_firebase/widgets/comments_bottom_sheet.dart';
 import 'package:instagram_clone_flutter_firebase/widgets/like_animation.dart';
 import 'package:instagram_clone_flutter_firebase/widgets/share_post_sheet.dart';
@@ -84,35 +85,39 @@ class _PostCardState extends State<PostCardProfile> {
   }
 
   void _showBoostSheet() {
-    final options = [
-      {
-        "title": "Free for 30 days",
-        "subtitle": "Trial boost for new posts",
-        "days": 30,
-        "interval": 4,
-        "maxInsertions": 8,
-      },
-      {
-        "title": "Rs 199 - 3 days",
-        "subtitle": "Reach ~1.5k-3k people",
-        "days": 3,
-        "interval": 4,
-        "maxInsertions": 12,
-      },
-      {
-        "title": "Rs 399 - 7 days",
-        "subtitle": "Reach ~4k-7k people",
-        "days": 7,
-        "interval": 5,
-        "maxInsertions": 16,
-      },
-      {
-        "title": "Rs 799 - 14 days",
-        "subtitle": "Reach ~10k-18k people",
-        "days": 14,
-        "interval": 6,
-        "maxInsertions": 20,
-      },
+      final options = [
+        {
+          "title": "Free for 30 days",
+          "subtitle": "Trial boost for new posts",
+          "amount": 0,
+          "days": 30,
+          "interval": 4,
+          "maxInsertions": 8,
+        },
+        {
+          "title": "Rs 199 - 3 days",
+          "subtitle": "Reach ~1.5k-3k people",
+          "amount": 199,
+          "days": 3,
+          "interval": 4,
+          "maxInsertions": 12,
+        },
+        {
+          "title": "Rs 399 - 7 days",
+          "subtitle": "Reach ~4k-7k people",
+          "amount": 399,
+          "days": 7,
+          "interval": 5,
+          "maxInsertions": 16,
+        },
+        {
+          "title": "Rs 799 - 14 days",
+          "subtitle": "Reach ~10k-18k people",
+          "amount": 799,
+          "days": 14,
+          "interval": 6,
+          "maxInsertions": 20,
+        },
     ];
     showModalBottomSheet(
       context: context,
@@ -190,26 +195,32 @@ class _PostCardState extends State<PostCardProfile> {
                         onPressed: () {
                           Navigator.pop(context);
                           final selected = options[selectedIndex];
-                          final days = selected["days"] as int? ?? 7;
-                          final interval = selected["interval"] as int? ?? 5;
-                          final maxInsertions =
-                              selected["maxInsertions"] as int? ?? 8;
-                          final postId = _safeString(widget.snap["postId"]);
-                          if (postId.isEmpty) return;
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder:
-                                  (_) => BoostReviewScreen(
-                                    postId: postId,
-                                    postUrl: _safeString(
-                                      widget.snap["postUrl"],
+                            final days = selected["days"] as int? ?? 7;
+                            final interval = selected["interval"] as int? ?? 5;
+                            final maxInsertions =
+                                selected["maxInsertions"] as int? ?? 8;
+                            final amount = selected["amount"] as int?;
+                            final title = selected["title"] as String?;
+                            final subtitle = selected["subtitle"] as String?;
+                            final postId = _safeString(widget.snap["postId"]);
+                            if (postId.isEmpty) return;
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder:
+                                    (_) => BoostReviewScreen(
+                                      postId: postId,
+                                      postUrl: _safeString(
+                                        widget.snap["postUrl"],
+                                      ),
+                                      days: days,
+                                      interval: interval,
+                                      maxInsertions: maxInsertions,
+                                      packageAmount: amount,
+                                      packageTitle: title,
+                                      packageSubtitle: subtitle,
                                     ),
-                                    days: days,
-                                    interval: interval,
-                                    maxInsertions: maxInsertions,
-                                  ),
-                            ),
-                          );
+                              ),
+                            );
                         },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: blueColor,
@@ -557,6 +568,77 @@ class _PostCardState extends State<PostCardProfile> {
     );
   }
 
+  Future<void> _hideUserPosts(String ownerUid) async {
+    final user = Provider.of<UserProvider>(context, listen: false).getUser;
+    if (user == null || ownerUid.isEmpty || user.uid == ownerUid) return;
+    await FirestoreMethods().muteUser(uid: user.uid, targetUid: ownerUid);
+    if (context.mounted) {
+      await Provider.of<UserProvider>(context, listen: false).refreshUser();
+      showSnackBar(
+        context: context,
+        content: "We'll show fewer posts like this.",
+        clr: secondaryColor,
+      );
+    }
+  }
+
+  void _showReportSheet() {
+    final reasons = [
+      "It's spam",
+      "Nudity or sexual activity",
+      "Hate speech or symbols",
+      "Violence or dangerous organizations",
+      "Bullying or harassment",
+      "Scam or fraud",
+      "False information",
+      "Something else",
+    ];
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: mobileBackgroundColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) {
+        return SafeArea(
+          child: ListView.separated(
+            shrinkWrap: true,
+            itemCount: reasons.length + 1,
+            separatorBuilder: (_, __) =>
+                const Divider(color: secondaryColor, height: 1),
+            itemBuilder: (context, index) {
+              if (index == 0) {
+                return const Padding(
+                  padding: EdgeInsets.fromLTRB(16, 12, 16, 8),
+                  child: Text(
+                    "Why are you reporting this ad?",
+                    style: TextStyle(
+                      color: primaryColor,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 16,
+                    ),
+                  ),
+                );
+              }
+              final reason = reasons[index - 1];
+              return ListTile(
+                title: Text(reason, style: const TextStyle(color: primaryColor)),
+                onTap: () {
+                  Navigator.pop(context);
+                  showSnackBar(
+                    context: context,
+                    content: "Thanks for letting us know. We'll review it.",
+                    clr: secondaryColor,
+                  );
+                },
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final user = Provider.of<UserProvider>(context).getUser;
@@ -654,19 +736,99 @@ class _PostCardState extends State<PostCardProfile> {
                     context: context,
                     builder: (context) {
                       return SimpleDialog(
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                         children: [
-                          SimpleDialogOption(
-                            child: const Text("Delete post"),
-                            onPressed: () async {
-                              await FirestoreMethods().deletePost(
-                                context,
-                                widget.snap["postId"],
-                              );
-                              if (context.mounted) {
+                          if (isOwner)
+                            SimpleDialogOption(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 14,
+                              ),
+                              child: const Row(
+                                children: [
+                                  Icon(
+                                    Icons.delete_outline,
+                                    color: Colors.redAccent,
+                                  ),
+                                  SizedBox(width: 10),
+                                  Text(
+                                    "Delete Post",
+                                    style: TextStyle(
+                                      color: Colors.redAccent,
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 16,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              onPressed: () async {
+                                await FirestoreMethods().deletePost(
+                                  context,
+                                  widget.snap["postId"],
+                                );
+                                if (context.mounted) {
+                                  Navigator.of(context).pop();
+                                }
+                              },
+                            )
+                          else ...[
+                            SimpleDialogOption(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 14,
+                              ),
+                              child: const Row(
+                                children: [
+                                  Icon(
+                                    Icons.visibility_off_outlined,
+                                    color: primaryColor,
+                                  ),
+                                  SizedBox(width: 10),
+                                  Text(
+                                    "Not Interested",
+                                    style: TextStyle(
+                                      color: primaryColor,
+                                      fontWeight: FontWeight.w500,
+                                      fontSize: 16,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              onPressed: () {
                                 Navigator.of(context).pop();
-                              }
-                            },
-                          ),
+                                _hideUserPosts(ownerUid);
+                              },
+                            ),
+                            SimpleDialogOption(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 14,
+                              ),
+                              child: const Row(
+                                children: [
+                                  Icon(
+                                    Icons.report_gmailerrorred_outlined,
+                                    color: Colors.redAccent,
+                                  ),
+                                  SizedBox(width: 10),
+                                  Text(
+                                    "Report Ad",
+                                    style: TextStyle(
+                                      color: Colors.redAccent,
+                                      fontWeight: FontWeight.w500,
+                                      fontSize: 16,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              onPressed: () {
+                                Navigator.of(context).pop();
+                                _showReportSheet();
+                              },
+                            ),
+                          ],
                         ],
                       );
                     },

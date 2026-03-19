@@ -10,10 +10,12 @@ import 'package:instagram_clone_flutter_firebase/screens/activity_screen.dart';
 import 'package:instagram_clone_flutter_firebase/screens/profile_screen.dart';
 import 'package:instagram_clone_flutter_firebase/screens/story_compose_screen.dart';
 import 'package:instagram_clone_flutter_firebase/screens/story_viewer_screen.dart';
+import 'package:instagram_clone_flutter_firebase/screens/live_broadcast_screen.dart';
+import 'package:instagram_clone_flutter_firebase/screens/live_viewer_screen.dart';
+import 'package:instagram_clone_flutter_firebase/screens/messages_screen.dart';
 import 'package:instagram_clone_flutter_firebase/utils/colors.dart';
 import 'package:instagram_clone_flutter_firebase/utils/global_variables.dart';
 import 'package:instagram_clone_flutter_firebase/utils/utils.dart';
-import 'package:instagram_clone_flutter_firebase/screens/saved_screen.dart';
 import 'package:instagram_clone_flutter_firebase/widgets/post_card.dart';
 import 'package:provider/provider.dart';
 
@@ -183,10 +185,13 @@ class FeedScreen extends StatelessWidget {
                 title: const Text("Live"),
                 onTap: () {
                   Navigator.pop(context);
-                  showSnackBar(
-                    context: context,
-                    content: "Live coming soon.",
-                    clr: secondaryColor,
+                  final user =
+                      Provider.of<UserProvider>(context, listen: false).getUser;
+                  if (user == null) return;
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => LiveBroadcastScreen(user: user),
+                    ),
                   );
                 },
               ),
@@ -264,11 +269,14 @@ class FeedScreen extends StatelessWidget {
                     onPressed: () {
                       Navigator.of(context).push(
                         MaterialPageRoute(
-                          builder: (_) => const SavedScreen(),
+                          builder: (_) => const MessagesScreen(),
                         ),
                       );
                     },
-                    icon: const Icon(Icons.bookmark_border, color: primaryColor),
+                    icon: const Icon(
+                      Icons.forum_outlined,
+                      color: primaryColor,
+                    ),
                   ),
                 ],
               ),
@@ -288,8 +296,21 @@ class FeedScreen extends StatelessWidget {
           final postData =
               snapshots.data!.docs.map((d) => d.data()).toList();
           final posts = _applyBoostPattern(postData);
+          final muted =
+              (user.mutedUsers as List).whereType<String>().toSet();
+          final blocked =
+              (user.blockedUsers as List).whereType<String>().toSet();
+          final filteredPosts =
+              posts.where((post) {
+                final uid = (post["uid"] ?? "").toString();
+                if (uid.isEmpty) return false;
+                if (muted.contains(uid) || blocked.contains(uid)) {
+                  return false;
+                }
+                return true;
+              }).toList();
           return ListView.builder(
-            itemCount: posts.length + 1,
+            itemCount: filteredPosts.length + 1,
             itemBuilder: (context, index) {
               if (index == 0) {
                 return Container(
@@ -299,7 +320,7 @@ class FeedScreen extends StatelessWidget {
                   child: _StoriesRow(user: user),
                 );
               }
-              final post = posts[index - 1];
+              final post = filteredPosts[index - 1];
               return Container(
                 margin: EdgeInsets.symmetric(
                   horizontal: width > webScreenSize ? width * 0.3 : 0,
@@ -382,6 +403,28 @@ class _StoriesRowState extends State<_StoriesRow> {
       }
     }
     if (orderedUniqueUids.isEmpty) return [];
+
+    final liveByUid = <String, Map<String, dynamic>>{};
+    for (var i = 0; i < orderedUniqueUids.length; i += 10) {
+      final chunk = orderedUniqueUids.sublist(
+        i,
+        i + 10 > orderedUniqueUids.length
+            ? orderedUniqueUids.length
+            : i + 10,
+      );
+      final liveSnap =
+          await FirebaseFirestore.instance
+              .collection("live_sessions")
+              .where("hostUid", whereIn: chunk)
+              .where("isLive", isEqualTo: true)
+              .get();
+      for (final doc in liveSnap.docs) {
+        final data = doc.data();
+        final uid = (data["hostUid"] ?? "").toString();
+        if (uid.isEmpty) continue;
+        liveByUid[uid] = {...data, "liveId": doc.id};
+      }
+    }
 
     final storyByUid = <String, Map<String, dynamic>>{};
     final storyHasByUid = <String, bool>{};
@@ -470,6 +513,7 @@ class _StoriesRowState extends State<_StoriesRow> {
     final results = <Map<String, dynamic>>[];
     for (final uid in orderedUniqueUids) {
         if (uid == widget.user.uid) {
+          final liveData = liveByUid[uid];
           results.add({
             "uid": uid,
             "username": widget.user.username,
@@ -477,11 +521,17 @@ class _StoriesRowState extends State<_StoriesRow> {
             "isYou": true,
             "hasStory": storyHasByUid[uid] == true,
             "hasUnseenStory": storyUnseenByUid[uid] == true,
+            "isLive": liveData != null,
+            "liveId": liveData?["liveId"],
+            "channelId": liveData?["channelId"],
           });
           continue;
         }
-      if (storyHasByUid[uid] != true) continue;
       final userData = usersByUid[uid] ?? {};
+      final liveData = liveByUid[uid];
+      if (storyHasByUid[uid] != true && liveData == null) {
+        continue;
+      }
       results.add({
         "uid": uid,
         "username": (userData["username"] ?? "").toString(),
@@ -489,6 +539,9 @@ class _StoriesRowState extends State<_StoriesRow> {
         "isYou": false,
         "hasStory": storyHasByUid[uid] == true,
         "hasUnseenStory": storyUnseenByUid[uid] == true,
+        "isLive": liveData != null,
+        "liveId": liveData?["liveId"],
+        "channelId": liveData?["channelId"],
       });
     }
 
@@ -588,7 +641,28 @@ class _StoriesRowState extends State<_StoriesRow> {
                       isYou: true,
                       hasStory: hasStory,
                       hasUnseenStory: hasUnseen,
+                      isLive: item["isLive"] == true,
                       onTap: () async {
+                        if (item["isLive"] == true &&
+                            item["liveId"] != null &&
+                            item["channelId"] != null) {
+                          await Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder:
+                                  (_) => LiveBroadcastScreen(
+                                    user: widget.user,
+                                    existingLiveId: item["liveId"],
+                                    existingChannelId: item["channelId"],
+                                    resume: true,
+                                  ),
+                            ),
+                          );
+                          if (!mounted) return;
+                          setState(() {
+                            _storiesFuture = _loadStories();
+                          });
+                          return;
+                        }
                         if (!hasStory) {
                           await Navigator.of(context).push(
                             MaterialPageRoute(
@@ -641,7 +715,23 @@ class _StoriesRowState extends State<_StoriesRow> {
                 isYou: false,
                 hasStory: hasStory,
                 hasUnseenStory: item["hasUnseenStory"] == true,
+                isLive: item["isLive"] == true,
                 onTap: () async {
+                  if (item["isLive"] == true && item["liveId"] != null) {
+                    await Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder:
+                            (_) => LiveViewerScreen(
+                              liveId: item["liveId"],
+                            ),
+                      ),
+                    );
+                    if (!mounted) return;
+                    setState(() {
+                      _storiesFuture = _loadStories();
+                    });
+                    return;
+                  }
                   if (!hasStory) return;
                   await Navigator.of(context).push(
                     PageRouteBuilder(
@@ -678,6 +768,7 @@ class _StoryAvatar extends StatelessWidget {
   final bool isYou;
   final bool hasStory;
   final bool hasUnseenStory;
+  final bool isLive;
   final VoidCallback? onTap;
   final VoidCallback? onAddStory;
 
@@ -687,6 +778,7 @@ class _StoryAvatar extends StatelessWidget {
     required this.isYou,
     required this.hasStory,
     required this.hasUnseenStory,
+    required this.isLive,
     this.onTap,
     this.onAddStory,
   });
@@ -695,10 +787,10 @@ class _StoryAvatar extends StatelessWidget {
   Widget build(BuildContext context) {
     final ringGradient = const LinearGradient(
       colors: [
-        Color(0xFFF58529),
-        Color(0xFFDD2A7B),
-        Color(0xFF8134AF),
-        Color(0xFF515BD4),
+        Color(0xFF2C2C2C),
+        Color(0xFF5A5A5A),
+        Color(0xFF8A8A8A),
+        Color(0xFFBDBDBD),
       ],
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
@@ -729,6 +821,29 @@ class _StoryAvatar extends StatelessWidget {
                         : null,
               ),
             ),
+            if (isLive)
+              Positioned(
+                left: 6,
+                right: 6,
+                bottom: -2,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Colors.red,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: Colors.white, width: 1),
+                  ),
+                  child: const Text(
+                    "LIVE",
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
             if (isYou)
               Positioned(
                 right: -2,
@@ -822,10 +937,10 @@ class _AppBarStoryAvatar extends StatelessWidget {
                   hasStory && hasUnseen
                       ? const LinearGradient(
                         colors: [
-                          Color(0xFFF58529),
-                          Color(0xFFDD2A7B),
-                          Color(0xFF8134AF),
-                          Color(0xFF515BD4),
+                          Color(0xFF2C2C2C),
+                          Color(0xFF5A5A5A),
+                          Color(0xFF8A8A8A),
+                          Color(0xFFBDBDBD),
                         ],
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,

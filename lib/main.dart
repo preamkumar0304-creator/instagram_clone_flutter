@@ -32,14 +32,35 @@ class MyApp extends StatelessWidget {
       child: Consumer<ThemeProvider>(
         builder: (context, themeProvider, child) {
           final baseTheme = ThemeData.light().copyWith(
-            scaffoldBackgroundColor: Colors.white,
+            scaffoldBackgroundColor: mobileBackgroundColor,
             appBarTheme: const AppBarTheme(
-              backgroundColor: Colors.white,
-              foregroundColor: Colors.black,
+              backgroundColor: mobileBackgroundColor,
+              foregroundColor: primaryColor,
+              iconTheme: IconThemeData(color: primaryColor),
             ),
-            iconTheme: const IconThemeData(color: Colors.black),
-            textTheme: const TextTheme(
-              bodyMedium: TextStyle(color: Colors.black),
+            iconTheme: const IconThemeData(color: primaryColor),
+            textTheme: ThemeData.light().textTheme.apply(
+                  bodyColor: primaryColor,
+                  displayColor: primaryColor,
+                ),
+            inputDecorationTheme: InputDecorationTheme(
+              filled: true,
+              fillColor: mobileSearchColor,
+              hintStyle: const TextStyle(color: secondaryColor),
+              labelStyle: const TextStyle(color: primaryColor),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: secondaryColor),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: primaryColor, width: 1.5),
+              ),
+            ),
+            textSelectionTheme: TextSelectionThemeData(
+              cursorColor: primaryColor,
+              selectionColor: Colors.black12,
+              selectionHandleColor: primaryColor,
             ),
           );
           return MaterialApp(

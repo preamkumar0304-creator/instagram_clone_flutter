@@ -81,38 +81,65 @@ class _SearchScreenState extends State<SearchScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final trendTags = const [
+      "Trending",
+      "Travel",
+      "Music",
+      "Food",
+      "Fitness",
+      "Art",
+      "Sports",
+      "Tech",
+    ];
     return Scaffold(
+      backgroundColor: mobileBackgroundColor,
       appBar: AppBar(
         backgroundColor: mobileBackgroundColor,
-        title: SizedBox(height: 40,
-          child: TextFormField(
-            style: TextStyle(color: primaryColor),
-            controller: searchController,
-            decoration: InputDecoration(
-              suffixIcon: GestureDetector(
-                onTap: () => searchController.clear(),
-                child: Icon(Icons.close, color: secondaryColor),
+        title: const Text(
+          "Search",
+          style: TextStyle(color: primaryColor, fontWeight: FontWeight.w600),
+        ),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(64),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: TextFormField(
+              style: const TextStyle(color: primaryColor),
+              controller: searchController,
+              decoration: InputDecoration(
+                suffixIcon: GestureDetector(
+                  onTap: () {
+                    searchController.clear();
+                    setState(() {
+                      isShowUsers = false;
+                    });
+                  },
+                  child: const Icon(Icons.close, color: secondaryColor),
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
+                filled: true,
+                fillColor: mobileSearchColor,
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: BorderSide(color: Colors.grey.shade300),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: const BorderSide(color: primaryColor, width: 1.5),
+                ),
+                hintText: "Search people, reels, posts",
+                hintStyle: const TextStyle(color: secondaryColor),
+                prefixIcon: const Icon(Icons.search, color: secondaryColor),
               ),
-              contentPadding: EdgeInsets.symmetric(),
-              filled: true,
-              fillColor: mobileBackgroundColor,
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-                borderSide: BorderSide(color: secondaryColor, width: 2),
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-                borderSide: BorderSide(color: blueColor, width: 2),
-              ),
-              hintText: "Search for a user",
-              hintStyle: TextStyle(color: secondaryColor),
-              prefixIcon: Icon(Icons.search, color: secondaryColor),
+              onFieldSubmitted: (value) {
+                setState(() {
+                  isShowUsers = true;
+                });
+              },
             ),
-            onFieldSubmitted: (value) {
-              setState(() {
-                isShowUsers = true;
-              });
-            },
           ),
         ),
       ),
@@ -178,6 +205,11 @@ class _SearchScreenState extends State<SearchScreen> {
                             ),
                             title: Text(
                               username,
+                              style: const TextStyle(color: primaryColor),
+                            ),
+                            subtitle: Text(
+                              "@$username",
+                              style: const TextStyle(color: secondaryColor),
                             ),
                           ),
                         );
@@ -201,71 +233,129 @@ class _SearchScreenState extends State<SearchScreen> {
                       ),
                     );
                   }
-                  return MasonryGridView.builder(
-                    mainAxisSpacing: 8,
-                    crossAxisSpacing: 8,
-                    gridDelegate:
-                        SliverSimpleGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 2,
+                  return Column(
+                    children: [
+                      SizedBox(
+                        height: 44,
+                        child: ListView.separated(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          scrollDirection: Axis.horizontal,
+                          itemBuilder: (context, index) {
+                            final tag = trendTags[index];
+                            return Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 14,
+                                vertical: 10,
+                              ),
+                              decoration: BoxDecoration(
+                                color: mobileSearchColor,
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(
+                                  color: Colors.grey.shade300,
+                                ),
+                              ),
+                              child: Text(
+                                tag,
+                                style: const TextStyle(color: primaryColor),
+                              ),
+                            );
+                          },
+                          separatorBuilder: (_, __) => const SizedBox(width: 8),
+                          itemCount: trendTags.length,
                         ),
-                    itemCount: media.length,
-                    itemBuilder: (context, index) {
-                      final item = media[index];
-                      final type = _safeString(item["type"]);
-                      final data =
-                          item["data"] is Map<String, dynamic>
-                              ? item["data"] as Map<String, dynamic>
-                              : <String, dynamic>{};
-                      final postUrl = _safeString(data["postUrl"]);
-                      final coverUrl = _safeString(data["coverUrl"]);
-                      final thumbnailUrl = _safeString(data["thumbnailUrl"]);
-                      final previewUrl =
-                          coverUrl.isNotEmpty
-                              ? coverUrl
-                              : (thumbnailUrl.isNotEmpty
-                                  ? thumbnailUrl
-                                  : postUrl);
+                      ),
+                      const SizedBox(height: 12),
+                      Expanded(
+                        child: MasonryGridView.builder(
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          mainAxisSpacing: 10,
+                          crossAxisSpacing: 10,
+                          gridDelegate:
+                              SliverSimpleGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: 2,
+                              ),
+                          itemCount: media.length,
+                          itemBuilder: (context, index) {
+                            final item = media[index];
+                            final type = _safeString(item["type"]);
+                            final data =
+                                item["data"] is Map<String, dynamic>
+                                    ? item["data"] as Map<String, dynamic>
+                                    : <String, dynamic>{};
+                            final postUrl = _safeString(data["postUrl"]);
+                            final coverUrl = _safeString(data["coverUrl"]);
+                            final thumbnailUrl = _safeString(data["thumbnailUrl"]);
+                            final previewUrl =
+                                coverUrl.isNotEmpty
+                                    ? coverUrl
+                                    : (thumbnailUrl.isNotEmpty
+                                        ? thumbnailUrl
+                                        : postUrl);
 
-                      return GestureDetector(
-                        onTap: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder:
-                                  (_) => SearchMediaViewerScreen(
-                                    items: media,
-                                    initialIndex: index,
+                            return GestureDetector(
+                              onTap: () {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder:
+                                        (_) => SearchMediaViewerScreen(
+                                          items: media,
+                                          initialIndex: index,
+                                        ),
                                   ),
-                            ),
-                          );
-                        },
-                        child: Stack(
-                          children: [
-                            if (previewUrl.isNotEmpty)
-                              Image.network(previewUrl, fit: BoxFit.cover)
-                            else
-                              Container(
-                                height: 160,
-                                color: Colors.black12,
-                                child: const Center(
-                                  child: Icon(
-                                    Icons.image_not_supported_outlined,
-                                    color: secondaryColor,
-                                  ),
+                                );
+                              },
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(16),
+                                child: Stack(
+                                  children: [
+                                    if (previewUrl.isNotEmpty)
+                                      AspectRatio(
+                                        aspectRatio: 1,
+                                        child: Image.network(
+                                          previewUrl,
+                                          fit: BoxFit.cover,
+                                        ),
+                                      )
+                                    else
+                                      Container(
+                                        height: 160,
+                                        color: Colors.grey.shade200,
+                                        child: const Center(
+                                          child: Icon(
+                                            Icons.image_not_supported_outlined,
+                                            color: secondaryColor,
+                                          ),
+                                        ),
+                                      ),
+                                    if (type == "reel")
+                                      Positioned(
+                                        top: 8,
+                                        right: 8,
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 8,
+                                            vertical: 4,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: Colors.white70,
+                                            borderRadius:
+                                                BorderRadius.circular(10),
+                                          ),
+                                          child: const Icon(
+                                            Icons.play_arrow,
+                                            color: Colors.black,
+                                            size: 18,
+                                          ),
+                                        ),
+                                      ),
+                                  ],
                                 ),
                               ),
-                            if (type == "reel")
-                              const Positioned(
-                                top: 8,
-                                right: 8,
-                                child: Icon(
-                                  Icons.play_circle_fill,
-                                  color: Colors.white,
-                                ),
-                              ),
-                          ],
+                            );
+                          },
                         ),
-                      );
-                    },
+                      ),
+                    ],
                   );
                 },
               ),

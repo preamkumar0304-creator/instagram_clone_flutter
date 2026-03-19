@@ -1,8 +1,10 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/svg.dart';
+import 'package:instagram_clone_flutter_firebase/providers/user_provider.dart';
 import 'package:instagram_clone_flutter_firebase/utils/colors.dart';
 import 'package:instagram_clone_flutter_firebase/utils/global_variables.dart';
+import 'package:provider/provider.dart';
 
 class WebScreenLayout extends StatefulWidget {
   const WebScreenLayout({super.key});
@@ -47,7 +49,9 @@ class _WebScreenLayoutState extends State<WebScreenLayout> {
     if (currentUser == null) {
       return const Center(child: CircularProgressIndicator());
     }
+    final user = Provider.of<UserProvider>(context).getUser;
     final items = homeScreenItems(currentUser.uid);
+    final photoUrl = user?.photoUrl ?? "";
 
     return Scaffold(
       appBar: AppBar(
@@ -62,36 +66,58 @@ class _WebScreenLayoutState extends State<WebScreenLayout> {
           IconButton(
             onPressed: () => navigationTapped(0),
             icon: Icon(
-              Icons.home,
+              _page == 0 ? Icons.home_filled : Icons.home_outlined,
               color: _page == 0 ? primaryColor : secondaryColor,
             ),
           ),
           IconButton(
             onPressed: () => navigationTapped(1),
             icon: Icon(
-              Icons.search,
+              _page == 1
+                  ? Icons.video_library
+                  : Icons.video_library_outlined,
               color: _page == 1 ? primaryColor : secondaryColor,
             ),
           ),
           IconButton(
             onPressed: () => navigationTapped(2),
             icon: Icon(
-              Icons.add_a_photo,
+              _page == 2 ? Icons.send : Icons.send_outlined,
               color: _page == 2 ? primaryColor : secondaryColor,
             ),
           ),
           IconButton(
             onPressed: () => navigationTapped(3),
             icon: Icon(
-              Icons.movie,
+              Icons.search,
               color: _page == 3 ? primaryColor : secondaryColor,
             ),
           ),
           IconButton(
             onPressed: () => navigationTapped(4),
-            icon: Icon(
-              Icons.person,
-              color: _page == 4 ? primaryColor : secondaryColor,
+            icon: Container(
+              padding: const EdgeInsets.all(2),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: _page == 4 ? primaryColor : Colors.transparent,
+                  width: 2,
+                ),
+              ),
+              child: CircleAvatar(
+                radius: 12,
+                backgroundImage:
+                    photoUrl.isNotEmpty ? NetworkImage(photoUrl) : null,
+                backgroundColor: Colors.grey.shade300,
+                child:
+                    photoUrl.isEmpty
+                        ? const Icon(
+                          Icons.person,
+                          size: 14,
+                          color: Colors.black,
+                        )
+                        : null,
+              ),
             ),
           ),
         ],
