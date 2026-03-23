@@ -73,6 +73,9 @@ class _SignupPasswordState extends State<SignupPassword> {
                     );
                   },
                   buttonText: "Next",
+                  bgClr: Colors.black,
+                  borderClr: Colors.black,
+                  textClr: Colors.white,
                 ),
               ),
             ],

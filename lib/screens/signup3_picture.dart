@@ -19,6 +19,17 @@ class SignupPicture extends StatefulWidget {
 class _SignupPictureState extends State<SignupPicture> {
   Uint8List? image;
   void selectImage() async {
+    final granted = await ensureGalleryPermission();
+    if (!granted) {
+      if (mounted) {
+        showSnackBar(
+          context: context,
+          content: "Gallery permission is required to pick a photo.",
+          clr: errorColor,
+        );
+      }
+      return;
+    }
     final im = await pickImage(ImageSource.gallery);
     if (im == null) return;
     setState(() {
@@ -73,6 +84,9 @@ class _SignupPictureState extends State<SignupPicture> {
                     selectImage();
                   },
                   buttonText: "Add picture",
+                  bgClr: Colors.black,
+                  borderClr: Colors.black,
+                  textClr: Colors.white,
                 ),
               ),
               Padding(
@@ -92,8 +106,9 @@ class _SignupPictureState extends State<SignupPicture> {
                     );
                   },
                   buttonText: "Next",
-                  bgClr: mobileBackgroundColor,
-                  borderClr: secondaryColor,
+                  bgClr: Colors.black,
+                  borderClr: Colors.black,
+                  textClr: Colors.white,
                 ),
               ),
             ],

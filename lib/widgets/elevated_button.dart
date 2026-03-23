@@ -19,7 +19,7 @@ class MyElevatedButton extends StatelessWidget {
     required this.onPressed,
     this.bgClr = blueColor,
     this.borderClr = mobileBackgroundColor,
-    this.textClr = Colors.white,
+    this.textClr = primaryColor,
     this.isLoading = false,
     this.height = 50,
     this.width = double.infinity,

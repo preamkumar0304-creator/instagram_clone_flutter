@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import 'package:instagram_clone_flutter_firebase/screens/profile_screen.dart';
@@ -29,6 +30,25 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   Future<List<Map<String, dynamic>>> _loadMedia() async {
+    final currentUid = FirebaseAuth.instance.currentUser?.uid ?? "";
+    final allowedUids = <String>{};
+    final blockedUids = <String>{};
+    if (currentUid.isNotEmpty) {
+      allowedUids.add(currentUid);
+      final userSnap =
+          await FirebaseFirestore.instance
+              .collection("users")
+              .doc(currentUid)
+              .get();
+      final userData = userSnap.data() ?? {};
+      final following =
+          (userData["following"] as List?)?.whereType<String>().toList() ?? [];
+      allowedUids.addAll(following);
+      final blocked =
+          (userData["blockedUsers"] as List?)?.whereType<String>().toList() ?? [];
+      blockedUids.addAll(blocked);
+    }
+
     final postsSnap =
         await FirebaseFirestore.instance
             .collection("posts")
@@ -65,7 +85,85 @@ class _SearchScreenState extends State<SearchScreen> {
       final bTime = b["sortTime"] as DateTime? ?? DateTime(1970);
       return bTime.compareTo(aTime);
     });
-    return items;
+
+    final uidsToCheck = <String>{};
+    for (final item in items) {
+      final data =
+          item["data"] is Map<String, dynamic>
+              ? item["data"] as Map<String, dynamic>
+              : <String, dynamic>{};
+      final uid = _safeString(data["uid"]);
+      if (uid.isEmpty) continue;
+      if (blockedUids.contains(uid)) continue;
+      if (!allowedUids.contains(uid)) {
+        uidsToCheck.add(uid);
+      }
+    }
+
+    final publicUids = <String>{};
+    final uidList = uidsToCheck.toList();
+    for (var i = 0; i < uidList.length; i += 10) {
+      final chunk = uidList.sublist(
+        i,
+        i + 10 > uidList.length ? uidList.length : i + 10,
+      );
+      final snap =
+          await FirebaseFirestore.instance
+              .collection("users")
+              .where(FieldPath.documentId, whereIn: chunk)
+              .get();
+      for (final doc in snap.docs) {
+        final data = doc.data();
+        if (data["isPublic"] == true) {
+          publicUids.add(doc.id);
+        }
+      }
+    }
+
+    return items.where((item) {
+      final data =
+          item["data"] is Map<String, dynamic>
+              ? item["data"] as Map<String, dynamic>
+              : <String, dynamic>{};
+      final uid = _safeString(data["uid"]);
+      if (uid.isEmpty) return false;
+      if (blockedUids.contains(uid)) return false;
+      return allowedUids.contains(uid) || publicUids.contains(uid);
+    }).toList();
+  }
+
+  Future<List<QueryDocumentSnapshot<Map<String, dynamic>>>> _searchUsers(
+    String rawQuery,
+  ) async {
+    final query = rawQuery.trim().toLowerCase();
+    if (query.isEmpty) return [];
+
+    final primarySnap =
+        await FirebaseFirestore.instance
+            .collection("users")
+            .orderBy("usernameLowercase")
+            .startAt([query])
+            .endAt(["$query\uf8ff"])
+            .limit(50)
+            .get();
+
+    final results = <String, QueryDocumentSnapshot<Map<String, dynamic>>>{};
+    for (final doc in primarySnap.docs) {
+      results[doc.id] = doc;
+    }
+
+    if (results.length < 50) {
+      final fallbackSnap =
+          await FirebaseFirestore.instance.collection("users").limit(200).get();
+      for (final doc in fallbackSnap.docs) {
+        final data = doc.data();
+        final username = _safeString(data["username"]).toLowerCase();
+        if (!username.contains(query)) continue;
+        results.putIfAbsent(doc.id, () => doc);
+      }
+    }
+
+    return results.values.toList();
   }
   @override
   void initState() {
@@ -146,24 +244,26 @@ class _SearchScreenState extends State<SearchScreen> {
       body:
           isShowUsers
               ? FutureBuilder(
-                future:
-                    FirebaseFirestore.instance
-                        .collection("users")
-                        .where(
-                          "username",
-                          isGreaterThanOrEqualTo: searchController.text.trim(),
-                        )
-                        .get(),
+                future: _searchUsers(searchController.text),
                 builder: (context, snapshot) {
                   if (!snapshot.hasData) {
                     return const Center(
                       child: CircularProgressIndicator(color: primaryColor),
                     );
                   } else {
+                    final docs = snapshot.data ?? [];
+                    if (docs.isEmpty) {
+                      return const Center(
+                        child: Text(
+                          "No users found.",
+                          style: TextStyle(color: primaryColor),
+                        ),
+                      );
+                    }
                     return ListView.builder(
-                      itemCount: (snapshot.data! as dynamic).docs.length,
+                      itemCount: docs.length,
                       itemBuilder: (context, index) {
-                        final doc = (snapshot.data! as dynamic).docs[index];
+                        final doc = docs[index];
                         final data =
                             (doc.data() as Map<String, dynamic>?) ?? {};
                         final username = _safeString(data["username"]);

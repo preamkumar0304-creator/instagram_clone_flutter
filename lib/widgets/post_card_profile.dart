@@ -1060,7 +1060,7 @@ class _PostCardState extends State<PostCardProfile> {
                     );
                   },
                   child: const Icon(
-                    Icons.send,
+                    Icons.send_outlined,
                     color: primaryColor,
                     size: 28,
                   ),

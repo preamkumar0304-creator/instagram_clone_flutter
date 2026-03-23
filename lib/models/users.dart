@@ -6,6 +6,7 @@ class UserModel {
   final String photoUrl;
   final String name;
   final String username;
+  final String usernameLowercase;
   final String bio;
   final String pronouns;
   final String gender;
@@ -30,6 +31,7 @@ class UserModel {
     required this.photoUrl,
     required this.name,
     required this.username,
+    required this.usernameLowercase,
     required this.bio,
     required this.pronouns,
     required this.gender,
@@ -56,6 +58,7 @@ class UserModel {
         "photoUrl": photoUrl,
         "name": name,
         "username": username,
+        "usernameLowercase": usernameLowercase,
         "bio": bio,
         "pronouns": pronouns,
         "gender": gender,
@@ -92,6 +95,9 @@ class UserModel {
       photoUrl: snapshot["photoUrl"] ?? '',
       name: snapshot["name"] ?? '',
       username: snapshot["username"] ?? '',
+      usernameLowercase:
+          snapshot["usernameLowercase"] ??
+          (snapshot["username"] ?? '').toString().toLowerCase(),
       bio: snapshot["bio"] ?? '',
       pronouns: snapshot["pronouns"] ?? '',
       gender: snapshot["gender"] ?? 'unspecified',

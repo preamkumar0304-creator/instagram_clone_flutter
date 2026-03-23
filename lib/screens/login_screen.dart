@@ -68,6 +68,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 child: MyElevatedButton(
                   buttonText: "Log in",
                   isLoading: _isLoading,
+                  textClr: Colors.white,
                   onPressed: () async {
                     setState(() {
                       _isLoading = true;
@@ -121,7 +122,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   buttonText: "Create new account",
                   bgClr: mobileBackgroundColor,
                   borderClr: blueColor,
-                  textClr: blueColor,
+                  textClr: primaryColor,
                 ),
               ),
             ],

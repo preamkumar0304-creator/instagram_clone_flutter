@@ -161,19 +161,79 @@ class ActivityScreen extends StatelessWidget {
                   final notifications = notifSnap.data?.docs ?? [];
                   for (final doc in notifications) {
                     final data = doc.data();
-                    if ((data["type"] ?? "") != "live") continue;
+                    final type = (data["type"] ?? "").toString();
                     final fromUid = (data["fromUid"] ?? "").toString();
-                    final liveId = (data["liveId"] ?? doc.id).toString();
                     final createdAt = _parseDateTime(data["createdAt"]);
-                    if (fromUid.isEmpty || liveId.isEmpty) continue;
-                    items.add(
-                      _ActivityItem.live(
-                        uid: fromUid,
-                        liveId: liveId,
-                        activityAt: createdAt,
-                      ),
-                    );
-                    userIds.add(fromUid);
+                    if (fromUid.isEmpty) continue;
+                    if (type == "live") {
+                      final liveId = (data["liveId"] ?? doc.id).toString();
+                      if (liveId.isEmpty) continue;
+                      items.add(
+                        _ActivityItem.live(
+                          uid: fromUid,
+                          liveId: liveId,
+                          activityAt: createdAt,
+                        ),
+                      );
+                      userIds.add(fromUid);
+                    } else if (type == "comment") {
+                      items.add(
+                        _ActivityItem.comment(
+                          uid: fromUid,
+                          postUrl: (data["postUrl"] ?? "").toString(),
+                          detail: (data["message"] ?? "").toString(),
+                          activityAt: createdAt,
+                        ),
+                      );
+                      userIds.add(fromUid);
+                    } else if (type == "message") {
+                      items.add(
+                        _ActivityItem.message(
+                          uid: fromUid,
+                          detail: (data["message"] ?? "").toString(),
+                          activityAt: createdAt,
+                        ),
+                      );
+                      userIds.add(fromUid);
+                    } else if (type == "share_post") {
+                      items.add(
+                        _ActivityItem.share(
+                          uid: fromUid,
+                          postUrl: (data["postUrl"] ?? "").toString(),
+                          detail: "Shared a post",
+                          activityAt: createdAt,
+                        ),
+                      );
+                      userIds.add(fromUid);
+                    } else if (type == "share_reel") {
+                      items.add(
+                        _ActivityItem.share(
+                          uid: fromUid,
+                          postUrl: (data["reelCoverUrl"] ?? "").toString(),
+                          detail: "Shared a reel",
+                          activityAt: createdAt,
+                        ),
+                      );
+                      userIds.add(fromUid);
+                    } else if (type == "share_profile") {
+                      items.add(
+                        _ActivityItem.share(
+                          uid: fromUid,
+                          postUrl: (data["profilePhotoUrl"] ?? "").toString(),
+                          detail: "Shared a profile",
+                          activityAt: createdAt,
+                        ),
+                      );
+                      userIds.add(fromUid);
+                    } else if (type == "follow_accept") {
+                      items.add(
+                        _ActivityItem.followAccept(
+                          uid: fromUid,
+                          activityAt: createdAt,
+                        ),
+                      );
+                      userIds.add(fromUid);
+                    }
                   }
 
                   // Follow requests (private accounts)
@@ -336,12 +396,31 @@ class ActivityScreen extends StatelessWidget {
                                       ? "$username requested to follow you"
                                       : item.type == _ActivityType.follow
                                           ? "$username started following you"
-                                          : item.type == _ActivityType.like
-                                              ? "$username liked your post"
-                                              : "$username is live now",
+                                          : item.type == _ActivityType.followAccept
+                                              ? "$username accepted your follow request"
+                                              : item.type == _ActivityType.like
+                                                  ? "$username liked your post"
+                                                  : item.type == _ActivityType.comment
+                                                      ? "$username commented on your post"
+                                                      : item.type == _ActivityType.message
+                                                          ? "$username sent you a message"
+                                                          : item.type == _ActivityType.share
+                                                              ? "$username shared something with you"
+                                                              : "$username is live now",
                                   style:
                                       const TextStyle(color: primaryColor),
                                 ),
+                                subtitle:
+                                    item.detail.isNotEmpty
+                                        ? Text(
+                                          item.detail,
+                                          style: const TextStyle(
+                                            color: secondaryColor,
+                                          ),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        )
+                                        : null,
                                 trailing:
                                     item.type == _ActivityType.followRequest
                                         ? Row(
@@ -386,8 +465,10 @@ class ActivityScreen extends StatelessWidget {
                                             ),
                                           ],
                                         )
-                                        : item.type == _ActivityType.like &&
-                                                item.postUrl.isNotEmpty
+                                        : (item.type == _ActivityType.like ||
+                                                item.type == _ActivityType.comment ||
+                                                item.type == _ActivityType.share) &&
+                                            item.postUrl.isNotEmpty
                                             ? ClipRRect(
                                               borderRadius:
                                                   BorderRadius.circular(6),
@@ -442,24 +523,36 @@ class ActivityScreen extends StatelessWidget {
   }
 }
 
-enum _ActivityType { follow, like, live, followRequest }
+enum _ActivityType {
+  follow,
+  like,
+  live,
+  followRequest,
+  followAccept,
+  comment,
+  message,
+  share,
+}
 
 class _ActivityItem {
   final _ActivityType type;
   final String uid;
   final String postUrl;
   final String liveId;
+  final String detail;
   final DateTime? activityAt;
 
   _ActivityItem.follow({required this.uid, required this.activityAt})
       : type = _ActivityType.follow,
         postUrl = "",
-        liveId = "";
+        liveId = "",
+        detail = "";
 
   _ActivityItem.followRequest({required this.uid, required this.activityAt})
       : type = _ActivityType.followRequest,
         postUrl = "",
-        liveId = "";
+        liveId = "",
+        detail = "";
 
   _ActivityItem.like({
     required this.uid,
@@ -467,7 +560,8 @@ class _ActivityItem {
     required this.activityAt,
   })
       : type = _ActivityType.like,
-        liveId = "";
+        liveId = "",
+        detail = "";
 
   _ActivityItem.live({
     required this.uid,
@@ -475,5 +569,38 @@ class _ActivityItem {
     required this.activityAt,
   })
       : type = _ActivityType.live,
-        postUrl = "";
+        postUrl = "",
+        detail = "";
+
+  _ActivityItem.comment({
+    required this.uid,
+    required this.postUrl,
+    required this.detail,
+    required this.activityAt,
+  }) : type = _ActivityType.comment,
+        liveId = "";
+
+  _ActivityItem.message({
+    required this.uid,
+    required this.detail,
+    required this.activityAt,
+  })  : type = _ActivityType.message,
+        postUrl = "",
+        liveId = "";
+
+  _ActivityItem.share({
+    required this.uid,
+    required this.postUrl,
+    required this.detail,
+    required this.activityAt,
+  }) : type = _ActivityType.share,
+        liveId = "";
+
+  _ActivityItem.followAccept({
+    required this.uid,
+    required this.activityAt,
+  })  : type = _ActivityType.followAccept,
+        postUrl = "",
+        liveId = "",
+        detail = "";
 }

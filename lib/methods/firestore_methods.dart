@@ -95,6 +95,19 @@ class FirestoreMethods {
         await _firestore.collection("posts").doc(postId).update({
           "likes": FieldValue.arrayUnion([uid]),
         });
+        final postSnap = await _firestore.collection("posts").doc(postId).get();
+        final data = postSnap.data() ?? {};
+        final ownerUid = (data["uid"] ?? "").toString();
+        final postUrl = (data["postUrl"] ?? "").toString();
+        if (ownerUid.isNotEmpty && ownerUid != uid) {
+          await addNotification(
+            toUid: ownerUid,
+            fromUid: uid,
+            type: "like",
+            postId: postId,
+            postUrl: postUrl,
+          );
+        }
       }
     } catch (e) {
       if (kDebugMode) {
@@ -131,6 +144,20 @@ class FirestoreMethods {
       await _firestore.collection("posts").doc(postId).update({
         "commentCount": FieldValue.increment(1),
       });
+      final postSnap = await _firestore.collection("posts").doc(postId).get();
+      final data = postSnap.data() ?? {};
+      final ownerUid = (data["uid"] ?? "").toString();
+      final postUrl = (data["postUrl"] ?? "").toString();
+      if (ownerUid.isNotEmpty && ownerUid != uid) {
+        await addNotification(
+          toUid: ownerUid,
+          fromUid: uid,
+          type: "comment",
+          postId: postId,
+          postUrl: postUrl,
+          message: commentText,
+        );
+      }
       message = "Comment Successfully Added!";
     } catch (err) {
       message = err.toString();
@@ -198,6 +225,11 @@ class FirestoreMethods {
         await _firestore.collection("users").doc(uid).update({
           "following": FieldValue.arrayUnion([followId]),
         });
+        await addNotification(
+          toUid: followId,
+          fromUid: uid,
+          type: "follow",
+        );
         return;
       }
 
@@ -212,6 +244,11 @@ class FirestoreMethods {
           "followRequests": FieldValue.arrayUnion([uid]),
           "followRequestTimes.$uid": DateTime.now(),
         });
+        await addNotification(
+          toUid: followId,
+          fromUid: uid,
+          type: "follow_request",
+        );
       }
     } catch (e) {
       e.toString();
@@ -236,6 +273,11 @@ class FirestoreMethods {
       "following": FieldValue.arrayUnion([currentUid]),
     });
     await batch.commit();
+    await addNotification(
+      toUid: requesterUid,
+      fromUid: currentUid,
+      type: "follow_accept",
+    );
   }
 
   Future<void> declineFollowRequest({
@@ -247,6 +289,41 @@ class FirestoreMethods {
       "followRequests": FieldValue.arrayRemove([requesterUid]),
       "followRequestTimes.$requesterUid": FieldValue.delete(),
     });
+  }
+
+  Future<void> addNotification({
+    required String toUid,
+    required String fromUid,
+    required String type,
+    String? message,
+    String? postId,
+    String? postUrl,
+    String? reelId,
+    String? reelCoverUrl,
+    String? profileUid,
+    String? profilePhotoUrl,
+  }) async {
+    if (toUid.isEmpty || fromUid.isEmpty || toUid == fromUid) return;
+    try {
+      await _firestore
+          .collection("users")
+          .doc(toUid)
+          .collection("notifications")
+          .add({
+            "type": type,
+            "fromUid": fromUid,
+            "toUid": toUid,
+            "message": message ?? "",
+            "postId": postId ?? "",
+            "postUrl": postUrl ?? "",
+            "reelId": reelId ?? "",
+            "reelCoverUrl": reelCoverUrl ?? "",
+            "profileUid": profileUid ?? "",
+            "profilePhotoUrl": profilePhotoUrl ?? "",
+            "createdAt": FieldValue.serverTimestamp(),
+            "isRead": false,
+          });
+    } catch (_) {}
   }
 
   Future<void> toggleSavePost({
@@ -293,29 +370,6 @@ class FirestoreMethods {
       }
       final contentHash = _contentHash(contentBytes);
       final now = DateTime.now();
-      final recentSnap =
-          await _firestore
-              .collection("stories")
-              .where("uid", isEqualTo: uid)
-              .orderBy("createdAt", descending: true)
-              .limit(20)
-              .get();
-      for (final doc in recentSnap.docs) {
-        final data = doc.data();
-        if ((data["contentHash"] ?? "") == contentHash) {
-          final createdRaw = data["createdAt"];
-          DateTime? createdAt;
-          if (createdRaw is Timestamp) {
-            createdAt = createdRaw.toDate();
-          } else if (createdRaw is DateTime) {
-            createdAt = createdRaw;
-          }
-          if (createdAt != null &&
-              now.difference(createdAt).inHours <= 24) {
-            return "Story already posted.";
-          }
-        }
-      }
       final bucket =
           now.millisecondsSinceEpoch ~/ const Duration(minutes: 5).inMilliseconds;
       final dedupeId = "${uid}_${contentHash}_${bucket}";

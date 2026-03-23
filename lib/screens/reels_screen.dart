@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:instagram_clone_flutter_firebase/utils/colors.dart';
+import 'package:instagram_clone_flutter_firebase/widgets/share_reel_sheet.dart';
 
 class ReelsScreen extends StatelessWidget {
   const ReelsScreen({super.key});
@@ -49,10 +50,15 @@ class ReelsScreen extends StatelessWidget {
               final data = docs[index].data();
               final title = _safeString(data["title"]);
               final username = _safeString(data["username"]);
+              final reelId = _safeString(data["reelId"]);
+              final reelUrl = _safeString(data["reelUrl"]);
+              final ownerUid = _safeString(data["uid"]);
+              final ownerPhotoUrl = _safeString(data["photoUrl"]);
               final coverUrl =
                   _safeString(data["coverUrl"]).isNotEmpty
                       ? _safeString(data["coverUrl"])
                       : _safeString(data["thumbnailUrl"]);
+              final thumbnailUrl = _safeString(data["thumbnailUrl"]);
               return Container(
                 margin: const EdgeInsets.only(bottom: 14),
                 height: 220,
@@ -166,6 +172,34 @@ class ReelsScreen extends StatelessWidget {
                               style: const TextStyle(color: secondaryColor),
                             ),
                           ],
+                        ),
+                      ),
+                      Positioned(
+                        right: 12,
+                        bottom: 12,
+                        child: IconButton(
+                          icon: const Icon(
+                            Icons.send_outlined,
+                            color: Colors.black,
+                          ),
+                          onPressed: () {
+                            showModalBottomSheet(
+                              context: context,
+                              isScrollControlled: true,
+                              useSafeArea: true,
+                              backgroundColor: Colors.transparent,
+                              builder:
+                                  (context) => ShareReelSheet(
+                                    reelId: reelId,
+                                    reelUrl: reelUrl,
+                                    reelOwnerUid: ownerUid,
+                                    reelOwnerUsername: username,
+                                    reelOwnerPhotoUrl: ownerPhotoUrl,
+                                    reelCoverUrl: coverUrl,
+                                    reelThumbnailUrl: thumbnailUrl,
+                                  ),
+                            );
+                          },
                         ),
                       ),
                     ],

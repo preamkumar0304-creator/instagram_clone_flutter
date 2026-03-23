@@ -10,6 +10,7 @@ import 'package:instagram_clone_flutter_firebase/responsive/mobile_screen_layout
 import 'package:instagram_clone_flutter_firebase/responsive/web_screen_layout.dart';
 import 'package:instagram_clone_flutter_firebase/screens/login_screen.dart';
 import 'package:instagram_clone_flutter_firebase/utils/colors.dart';
+import 'package:instagram_clone_flutter_firebase/utils/app_usage_tracker.dart';
 import 'package:provider/provider.dart';
 
 void main() async {
@@ -28,6 +29,7 @@ class MyApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider(create: (_) => UserProvider()),
         ChangeNotifierProvider(create: (_) => ThemeProvider()), // ✅ add this
+        ChangeNotifierProvider(create: (_) => AppUsageTracker()),
       ],
       child: Consumer<ThemeProvider>(
         builder: (context, themeProvider, child) {

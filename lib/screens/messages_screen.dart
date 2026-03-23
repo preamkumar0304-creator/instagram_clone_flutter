@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:instagram_clone_flutter_firebase/methods/firestore_methods.dart';
 import 'package:instagram_clone_flutter_firebase/methods/storage_methods.dart';
 import 'package:instagram_clone_flutter_firebase/screens/chat_screen.dart';
 import 'package:instagram_clone_flutter_firebase/screens/message_requests_screen.dart';
@@ -9,8 +10,14 @@ import 'package:instagram_clone_flutter_firebase/screens/profile_screen.dart';
 import 'package:instagram_clone_flutter_firebase/utils/colors.dart';
 import 'package:instagram_clone_flutter_firebase/utils/utils.dart';
 
-class MessagesScreen extends StatelessWidget {
+class MessagesScreen extends StatefulWidget {
   const MessagesScreen({super.key});
+
+  @override
+  State<MessagesScreen> createState() => _MessagesScreenState();
+}
+
+class _MessagesScreenState extends State<MessagesScreen> {
 
   List<String> _safeStringList(dynamic value) {
     if (value is List) {
@@ -24,7 +31,10 @@ class MessagesScreen extends StatelessWidget {
     return value.toString();
   }
 
-  Future<List<Map<String, dynamic>>> _loadUsers(List<String> ids) async {
+  Future<List<Map<String, dynamic>>> _loadUsers(
+    List<String> ids,
+    String currentUid,
+  ) async {
     if (ids.isEmpty) return [];
     final usersById = <String, Map<String, dynamic>>{};
     for (var i = 0; i < ids.length; i += 10) {
@@ -42,13 +52,21 @@ class MessagesScreen extends StatelessWidget {
     for (final id in ids) {
       final data = usersById[id];
       if (data == null) continue;
+      final last = await _loadLastMessage(currentUid, id);
+      final lastTime = _extractMessageTime(last);
       results.add({
         "uid": id,
         "name": _safeString(data["name"]),
         "username": _safeString(data["username"]),
         "photoUrl": _safeString(data["photoUrl"]),
+        "lastTime": lastTime,
       });
     }
+    results.sort((a, b) {
+      final aTime = a["lastTime"] as DateTime? ?? DateTime(1970);
+      final bTime = b["lastTime"] as DateTime? ?? DateTime(1970);
+      return bTime.compareTo(aTime);
+    });
     return results;
   }
 
@@ -77,11 +95,46 @@ class MessagesScreen extends StatelessWidget {
             .collection("chats")
             .doc(chatId)
             .collection("messages")
-            .orderBy("createdAt", descending: true)
+            .orderBy("createdAtLocal", descending: true)
             .limit(1)
             .get();
     if (snap.docs.isEmpty) return null;
     return snap.docs.first.data();
+  }
+
+  DateTime _extractMessageTime(Map<String, dynamic>? msg) {
+    if (msg == null) return DateTime.fromMillisecondsSinceEpoch(0);
+    final localRaw = msg["createdAtLocal"];
+    if (localRaw is Timestamp) return localRaw.toDate();
+    if (localRaw is DateTime) return localRaw;
+    final createdRaw = msg["createdAt"];
+    if (createdRaw is Timestamp) return createdRaw.toDate();
+    if (createdRaw is DateTime) return createdRaw;
+    return DateTime.fromMillisecondsSinceEpoch(0);
+  }
+
+  Future<List<Map<String, dynamic>>> _loadUsersWithLastMessage(
+    String currentUid,
+    List<Map<String, dynamic>> users,
+  ) async {
+    final results = <Map<String, dynamic>>[];
+    for (final user in users) {
+      final uid = _safeString(user["uid"]);
+      if (uid.isEmpty) continue;
+      final msg = await _loadLastMessage(currentUid, uid);
+      final time = _extractMessageTime(msg);
+      results.add({
+        ...user,
+        "lastMessage": msg,
+        "lastTime": time,
+      });
+    }
+    results.sort((a, b) {
+      final aTime = a["lastTime"] as DateTime? ?? DateTime(1970);
+      final bTime = b["lastTime"] as DateTime? ?? DateTime(1970);
+      return bTime.compareTo(aTime);
+    });
+    return results;
   }
 
   Future<void> _sendCameraMessage({
@@ -108,13 +161,24 @@ class MessagesScreen extends StatelessWidget {
           .doc(chatId)
           .collection("messages")
           .add({
+            "type": "image",
             "text": "",
             "imageUrl": imageUrl,
             "fromUid": currentUid,
             "toUid": otherUid,
             "createdAt": FieldValue.serverTimestamp(),
+            "createdAtLocal": DateTime.now(),
             "reactions": {},
           });
+      await FirestoreMethods().addNotification(
+        toUid: otherUid,
+        fromUid: currentUid,
+        type: "message",
+        message: "Photo",
+      );
+      if (mounted) {
+        setState(() {});
+      }
       if (context.mounted) {
         showSnackBar(
           context: context,
@@ -338,7 +402,7 @@ class MessagesScreen extends StatelessWidget {
             );
           }
           return FutureBuilder<List<Map<String, dynamic>>>(
-            future: _loadUsers(all),
+            future: _loadUsers(all, currentUid),
             builder: (context, usersSnap) {
               if (usersSnap.connectionState == ConnectionState.waiting) {
                 return const Center(
@@ -408,21 +472,35 @@ class MessagesScreen extends StatelessWidget {
                           future: _loadLastMessage(currentUid, uid),
                           builder: (context, msgSnap) {
                             final msg = msgSnap.data;
+                            final type =
+                                msg == null ? "" : _safeString(msg["type"]);
                             final imageUrl =
                                 msg == null ? "" : _safeString(msg["imageUrl"]);
+                            final videoUrl =
+                                msg == null ? "" : _safeString(msg["videoUrl"]);
+                            final audioUrl =
+                                msg == null ? "" : _safeString(msg["audioUrl"]);
                             final text = msg == null
                                 ? "Tap to chat"
-                                : (imageUrl.isNotEmpty
-                                    ? "Photo"
-                                    : _safeString(msg["text"]));
-                            final createdRaw = msg?["createdAt"];
-                            DateTime createdAt =
-                                DateTime.fromMillisecondsSinceEpoch(0);
-                            if (createdRaw is Timestamp) {
-                              createdAt = createdRaw.toDate();
-                            } else if (createdRaw is DateTime) {
-                              createdAt = createdRaw;
-                            }
+                                : (type == "share_post"
+                                    ? "Shared a post"
+                                    : type == "share_reel"
+                                        ? "Shared a reel"
+                                    : type == "share_profile"
+                                        ? "Shared a profile"
+                                        : videoUrl.isNotEmpty ||
+                                                type == "video"
+                                            ? "Video"
+                                            : audioUrl.isNotEmpty ||
+                                                    type == "audio"
+                                                ? "Voice message"
+                                                : imageUrl.isNotEmpty ||
+                                                        type == "image"
+                                                    ? "Photo"
+                                                    : _safeString(
+                                                      msg["text"],
+                                                    ));
+                            final createdAt = _extractMessageTime(msg);
                             final timeLabel =
                                 msg == null ? "" : _formatRelativeTime(createdAt);
                             final fromUid =
@@ -464,14 +542,17 @@ class MessagesScreen extends StatelessWidget {
                                 username.isNotEmpty ? username : "User",
                                 style: const TextStyle(
                                   color: primaryColor,
-                                  fontWeight: FontWeight.w600,
+                                  fontWeight: FontWeight.w400,
                                 ),
                               ),
                               subtitle: Text(
                                 timeLabel.isEmpty
                                     ? text
                                     : "$text · $timeLabel",
-                                style: const TextStyle(color: secondaryColor),
+                                style: const TextStyle(
+                                  color: secondaryColor,
+                                  fontWeight: FontWeight.w400,
+                                ),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                               ),

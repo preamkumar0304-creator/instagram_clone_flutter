@@ -540,7 +540,7 @@ class _PostCardState extends State<PostCard> {
                 GestureDetector(
                   onTap: _openShareSheet,
                   child: const Icon(
-                    Icons.send,
+                    Icons.send_outlined,
                     color: primaryColor,
                     size: 28,
                   ),
@@ -568,7 +568,9 @@ class _PostCardState extends State<PostCard> {
                     }
                   },
                   icon: Icon(
-                    isSaved ? Icons.bookmark : Icons.bookmark_border,
+                    isSaved
+                        ? Icons.bookmark_rounded
+                        : Icons.bookmark_border_rounded,
                     color: primaryColor,
                     size: 28,
                   ),

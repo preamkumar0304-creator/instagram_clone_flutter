@@ -1094,6 +1094,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   Widget build(BuildContext context) {
     final isOwner = FirebaseAuth.instance.currentUser?.uid == widget.uid;
+    final isPublic = userData["isPublic"] == true;
+    final canViewPrivate = isOwner || isPublic || isFollowing;
 
     if (isLoading) {
       return Center(child: CircularProgressIndicator(color: primaryColor));
@@ -1317,32 +1319,90 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               _buildProfileActions(isOwner),
               const SizedBox(height: 8),
-              _buildHighlightsRow(isOwner),
-              const SizedBox(height: 10),
-              const TabBar(
-                indicator: UnderlineTabIndicator(
-                  borderSide: BorderSide(color: Colors.transparent, width: 0),
-                ),
-                indicatorColor: Colors.transparent,
-                dividerColor: Colors.transparent,
-                tabs: [
-                  Tab(icon: Icon(Icons.grid_on, color: primaryColor)),
-                  Tab(icon: Icon(Icons.video_library, color: primaryColor)),
-                  Tab(icon: Icon(Icons.person_pin, color: primaryColor)),
-                ],
-              ),
-              Expanded(
-                child: TabBarView(
-                  children: [
-                    _PostsGrid(uid: widget.uid),
-                    const _PlaceholderTab(label: "Reels coming soon"),
-                    const _PlaceholderTab(label: "Tagged posts coming soon"),
+              if (canViewPrivate) ...[
+                _buildHighlightsRow(isOwner),
+                const SizedBox(height: 10),
+                const TabBar(
+                  indicator: UnderlineTabIndicator(
+                    borderSide: BorderSide(color: Colors.transparent, width: 0),
+                  ),
+                  indicatorColor: Colors.transparent,
+                  dividerColor: Colors.transparent,
+                  tabs: [
+                    Tab(icon: Icon(Icons.grid_on, color: primaryColor)),
+                    Tab(icon: Icon(Icons.video_library, color: primaryColor)),
+                    Tab(icon: Icon(Icons.person_pin, color: primaryColor)),
                   ],
                 ),
-              ),
+                Expanded(
+                  child: TabBarView(
+                    children: [
+                      _PostsGrid(uid: widget.uid),
+                      const _PlaceholderTab(label: "Reels coming soon"),
+                      const _PlaceholderTab(label: "Tagged posts coming soon"),
+                    ],
+                  ),
+                ),
+              ] else ...[
+                Expanded(
+                  child: _PrivateAccountNotice(
+                    username: _safeString(userData["username"]),
+                  ),
+                ),
+              ],
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _PrivateAccountNotice extends StatelessWidget {
+  final String username;
+
+  const _PrivateAccountNotice({required this.username});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 72,
+            height: 72,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: secondaryColor, width: 2),
+            ),
+            child: const Icon(
+              Icons.lock_outline,
+              color: primaryColor,
+              size: 36,
+            ),
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            "This account is private",
+            style: TextStyle(
+              color: primaryColor,
+              fontWeight: FontWeight.w600,
+              fontSize: 16,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Text(
+              username.isNotEmpty
+                  ? "Follow @$username to see their photos and videos."
+                  : "Follow this account to see their photos and videos.",
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: secondaryColor),
+            ),
+          ),
+        ],
       ),
     );
   }

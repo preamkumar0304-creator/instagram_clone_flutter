@@ -289,10 +289,19 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       final existing =
           await FirebaseFirestore.instance
               .collection("users")
-              .where("username", isEqualTo: newUsername)
+              .where("usernameLowercase", isEqualTo: newUsername.toLowerCase())
               .limit(1)
               .get();
-      if (existing.docs.isNotEmpty && existing.docs.first.id != widget.uid) {
+      final legacyExisting =
+          existing.docs.isNotEmpty
+              ? existing
+              : await FirebaseFirestore.instance
+                  .collection("users")
+                  .where("username", isEqualTo: newUsername)
+                  .limit(1)
+                  .get();
+      if (legacyExisting.docs.isNotEmpty &&
+          legacyExisting.docs.first.id != widget.uid) {
         showSnackBar(
           context: context,
           content: "That username is already taken.",
@@ -301,6 +310,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         return;
       }
       updates["username"] = newUsername;
+      updates["usernameLowercase"] = newUsername.toLowerCase();
     }
     if (newBio != widget.initialBio) {
       updates["bio"] = newBio;

@@ -509,6 +509,19 @@ class _AddPostScreenState extends State<AddPostScreen> {
 
   Future<void> _openSystemGalleryFallback() async {
     if (_isLoading) return;
+    final granted = await ensureGalleryPermission(
+      forVideo: _createType == "reel" || _createType == "story",
+    );
+    if (!granted) {
+      if (mounted) {
+        showSnackBar(
+          context: context,
+          content: "Gallery permission is required to pick media.",
+          clr: errorColor,
+        );
+      }
+      return;
+    }
     final picker = ImagePicker();
     if (_createType == "reel") {
       final video = await picker.pickVideo(source: ImageSource.gallery);
@@ -731,6 +744,21 @@ class _AddPostScreenState extends State<AddPostScreen> {
   }
 
   Future<void> _pickFromSource(ImageSource source) async {
+    if (source == ImageSource.gallery) {
+      final granted = await ensureGalleryPermission(
+        forVideo: _createType == "reel" || _createType == "story",
+      );
+      if (!granted) {
+        if (mounted) {
+          showSnackBar(
+            context: context,
+            content: "Gallery permission is required to pick media.",
+            clr: errorColor,
+          );
+        }
+        return;
+      }
+    }
     if (_createType == "reel") {
       final picker = ImagePicker();
       final video = await picker.pickVideo(source: source);
@@ -1270,10 +1298,17 @@ class _AddPostScreenState extends State<AddPostScreen> {
                   final asset = visibleAssets[index - 1];
                   final isSelected = _selectedAsset?.id == asset.id;
                   return GestureDetector(
+                    behavior: HitTestBehavior.opaque,
                     onTap: () {
                       setState(() {
                         _selectedAsset = asset;
                       });
+                      if (_isLoading) return;
+                      if (_createType == "post" ||
+                          _createType == "story" ||
+                          _createType == "reel") {
+                        _handleNextFromPicker();
+                      }
                     },
                     child: Stack(
                       children: [

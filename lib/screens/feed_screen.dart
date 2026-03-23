@@ -12,15 +12,22 @@ import 'package:instagram_clone_flutter_firebase/screens/story_compose_screen.da
 import 'package:instagram_clone_flutter_firebase/screens/story_viewer_screen.dart';
 import 'package:instagram_clone_flutter_firebase/screens/live_broadcast_screen.dart';
 import 'package:instagram_clone_flutter_firebase/screens/live_viewer_screen.dart';
-import 'package:instagram_clone_flutter_firebase/screens/messages_screen.dart';
 import 'package:instagram_clone_flutter_firebase/utils/colors.dart';
 import 'package:instagram_clone_flutter_firebase/utils/global_variables.dart';
 import 'package:instagram_clone_flutter_firebase/utils/utils.dart';
 import 'package:instagram_clone_flutter_firebase/widgets/post_card.dart';
 import 'package:provider/provider.dart';
 
-class FeedScreen extends StatelessWidget {
+class FeedScreen extends StatefulWidget {
   const FeedScreen({super.key});
+
+  @override
+  State<FeedScreen> createState() => _FeedScreenState();
+}
+
+class _FeedScreenState extends State<FeedScreen> {
+  Future<List<Map<String, dynamic>>>? _privacyFuture;
+  int _privacySignature = 0;
 
   int _safeInt(dynamic value) {
     if (value is int) return value;
@@ -88,6 +95,74 @@ class FeedScreen extends StatelessWidget {
       }
     }
     return result;
+  }
+
+  Future<List<Map<String, dynamic>>> _filterByPrivacy({
+    required List<Map<String, dynamic>> posts,
+    required Set<String> allowedUids,
+  }) async {
+    if (posts.isEmpty) return posts;
+    final uidsToCheck = <String>{};
+    for (final post in posts) {
+      final uid = (post["uid"] ?? "").toString();
+      if (uid.isEmpty) continue;
+      if (!allowedUids.contains(uid)) {
+        uidsToCheck.add(uid);
+      }
+    }
+    if (uidsToCheck.isEmpty) return posts;
+
+    final publicUids = <String>{};
+    final uidList = uidsToCheck.toList();
+    for (var i = 0; i < uidList.length; i += 10) {
+      final chunk = uidList.sublist(
+        i,
+        i + 10 > uidList.length ? uidList.length : i + 10,
+      );
+      final snap =
+          await FirebaseFirestore.instance
+              .collection("users")
+              .where(FieldPath.documentId, whereIn: chunk)
+              .get();
+      for (final doc in snap.docs) {
+        final data = doc.data();
+        if (data["isPublic"] == true) {
+          publicUids.add(doc.id);
+        }
+      }
+    }
+
+    return posts.where((post) {
+      final uid = (post["uid"] ?? "").toString();
+      if (uid.isEmpty) return false;
+      return allowedUids.contains(uid) || publicUids.contains(uid);
+    }).toList();
+  }
+
+  int _hashPosts(List<Map<String, dynamic>> posts) {
+    var hash = posts.length;
+    for (final post in posts) {
+      final id =
+          (post["postId"] ?? post["id"] ?? post["uid"] ?? "").toString();
+      hash = 0x1fffffff & (hash * 31 + id.hashCode);
+    }
+    return hash;
+  }
+
+  int _hashAllowedUids(Set<String> allowedUids) {
+    final ordered = allowedUids.toList()..sort();
+    var hash = ordered.length;
+    for (final uid in ordered) {
+      hash = 0x1fffffff & (hash * 31 + uid.hashCode);
+    }
+    return hash;
+  }
+
+  int _privacyKey(
+    List<Map<String, dynamic>> posts,
+    Set<String> allowedUids,
+  ) {
+    return Object.hash(_hashPosts(posts), _hashAllowedUids(allowedUids));
   }
 
   void _openCreateMenu(BuildContext context) {
@@ -265,19 +340,6 @@ class FeedScreen extends StatelessWidget {
                       color: primaryColor,
                     ),
                   ),
-                  IconButton(
-                    onPressed: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => const MessagesScreen(),
-                        ),
-                      );
-                    },
-                    icon: const Icon(
-                      Icons.forum_outlined,
-                      color: primaryColor,
-                    ),
-                  ),
                 ],
               ),
       body: StreamBuilder(
@@ -309,24 +371,47 @@ class FeedScreen extends StatelessWidget {
                 }
                 return true;
               }).toList();
-          return ListView.builder(
-            itemCount: filteredPosts.length + 1,
-            itemBuilder: (context, index) {
-              if (index == 0) {
-                return Container(
-                  margin: EdgeInsets.symmetric(
-                    horizontal: width > webScreenSize ? width * 0.3 : 0,
-                  ),
-                  child: _StoriesRow(user: user),
+          final allowedUids = <String>{
+            user.uid,
+            ...(user.following as List).whereType<String>(),
+          };
+          final privacyKey = _privacyKey(filteredPosts, allowedUids);
+          if (_privacyFuture == null || _privacySignature != privacyKey) {
+            _privacySignature = privacyKey;
+            _privacyFuture = _filterByPrivacy(
+              posts: filteredPosts,
+              allowedUids: allowedUids,
+            );
+          }
+          return FutureBuilder<List<Map<String, dynamic>>>(
+            future: _privacyFuture,
+            builder: (context, privacySnap) {
+              final visiblePosts = privacySnap.data ?? [];
+              if (privacySnap.connectionState == ConnectionState.waiting) {
+                return const Center(
+                  child: CircularProgressIndicator(color: primaryColor),
                 );
               }
-              final post = filteredPosts[index - 1];
-              return Container(
-                margin: EdgeInsets.symmetric(
-                  horizontal: width > webScreenSize ? width * 0.3 : 0,
-                  vertical: width > webScreenSize ? 15 : 0,
-                ),
-                child: PostCard(snap: post),
+              return ListView.builder(
+                itemCount: visiblePosts.length + 1,
+                itemBuilder: (context, index) {
+                  if (index == 0) {
+                    return Container(
+                      margin: EdgeInsets.symmetric(
+                        horizontal: width > webScreenSize ? width * 0.3 : 0,
+                      ),
+                      child: _StoriesRow(user: user),
+                    );
+                  }
+                  final post = visiblePosts[index - 1];
+                  return Container(
+                    margin: EdgeInsets.symmetric(
+                      horizontal: width > webScreenSize ? width * 0.3 : 0,
+                      vertical: width > webScreenSize ? 15 : 0,
+                    ),
+                    child: PostCard(snap: post),
+                  );
+                },
               );
             },
           );

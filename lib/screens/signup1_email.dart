@@ -62,6 +62,9 @@ class _SignupEmailState extends State<SignupEmail> {
                 child: MyElevatedButton(
                   buttonText: "Next",
                   isLoading: _isChecking,
+                  bgClr: Colors.black,
+                  borderClr: Colors.black,
+                  textClr: Colors.white,
                   onPressed: () async {
                     if (_isChecking) return;
                     final email = emailController.text.trim();
@@ -93,15 +96,6 @@ class _SignupEmailState extends State<SignupEmail> {
                       ),
                     );
                   },
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.only(top: 5),
-                child: MyElevatedButton(
-                  onPressed: () {},
-                  buttonText: "Sign up with Mobile Number",
-                  bgClr: mobileBackgroundColor,
-                  borderClr: secondaryColor,
                 ),
               ),
             ],

@@ -10,20 +10,40 @@ class AuthMethods {
 
   Future<void> _ensureUserDoc(User user) async {
     final userDoc = await _firestore.collection("users").doc(user.uid).get();
-    if (userDoc.exists) return;
+    if (userDoc.exists) {
+      final data = userDoc.data() ?? {};
+      final username = (data["username"] ?? "").toString();
+      final lower = (data["usernameLowercase"] ?? "").toString();
+      if (username.isNotEmpty && lower != username.toLowerCase()) {
+        await _firestore.collection("users").doc(user.uid).update({
+          "usernameLowercase": username.toLowerCase(),
+        });
+      }
+      return;
+    }
 
     final baseUsername = (user.email ?? "user").split("@").first;
     String uniqueUsername =
         baseUsername.trim().isEmpty ? "user" : baseUsername.trim();
     int counter = 1;
     while (true) {
+      final usernameLower = uniqueUsername.toLowerCase();
       final usernameCheck =
           await _firestore
               .collection("users")
-              .where("username", isEqualTo: uniqueUsername)
+              .where("usernameLowercase", isEqualTo: usernameLower)
+              .limit(1)
               .get();
       if (usernameCheck.docs.isEmpty) {
-        break;
+        final legacyCheck =
+            await _firestore
+                .collection("users")
+                .where("username", isEqualTo: uniqueUsername)
+                .limit(1)
+                .get();
+        if (legacyCheck.docs.isEmpty) {
+          break;
+        }
       }
       uniqueUsername = "$baseUsername$counter";
       counter++;
@@ -34,6 +54,7 @@ class AuthMethods {
       "email": user.email ?? "",
       "name": "",
       "username": uniqueUsername,
+      "usernameLowercase": uniqueUsername.toLowerCase(),
       "bio": "",
       "pronouns": "",
       "photoUrl": "https://via.placeholder.com/150",
@@ -127,13 +148,22 @@ class AuthMethods {
       String uniqueUsername = username.trim();
       int counter = 1;
       while (true) {
+        final usernameLower = uniqueUsername.toLowerCase();
         final QuerySnapshot usernameCheck = await _firestore
             .collection("users")
-            .where("username", isEqualTo: uniqueUsername)
+            .where("usernameLowercase", isEqualTo: usernameLower)
+            .limit(1)
             .get();
 
         if (usernameCheck.docs.isEmpty) {
-          break;
+          final QuerySnapshot legacyCheck = await _firestore
+              .collection("users")
+              .where("username", isEqualTo: uniqueUsername)
+              .limit(1)
+              .get();
+          if (legacyCheck.docs.isEmpty) {
+            break;
+          }
         }
         uniqueUsername = "$username$counter";
         counter++;
@@ -167,6 +197,7 @@ class AuthMethods {
         uid: userCred.user!.uid,
         name: "",
         username: uniqueUsername,
+        usernameLowercase: uniqueUsername.toLowerCase(),
         email: email,
         bio: bio,
         pronouns: "",

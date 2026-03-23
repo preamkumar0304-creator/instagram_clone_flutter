@@ -4,27 +4,31 @@ import 'package:flutter/material.dart';
 import 'package:instagram_clone_flutter_firebase/methods/firestore_methods.dart';
 import 'package:instagram_clone_flutter_firebase/utils/colors.dart';
 
-class SharePostSheet extends StatefulWidget {
-  final String postId;
-  final String postUrl;
-  final String postOwnerUid;
-  final String postOwnerUsername;
-  final String postOwnerPhotoUrl;
+class ShareReelSheet extends StatefulWidget {
+  final String reelId;
+  final String reelUrl;
+  final String reelOwnerUid;
+  final String reelOwnerUsername;
+  final String reelOwnerPhotoUrl;
+  final String reelCoverUrl;
+  final String reelThumbnailUrl;
 
-  const SharePostSheet({
+  const ShareReelSheet({
     super.key,
-    required this.postId,
-    required this.postUrl,
-    required this.postOwnerUid,
-    required this.postOwnerUsername,
-    required this.postOwnerPhotoUrl,
+    required this.reelId,
+    required this.reelUrl,
+    required this.reelOwnerUid,
+    required this.reelOwnerUsername,
+    required this.reelOwnerPhotoUrl,
+    required this.reelCoverUrl,
+    required this.reelThumbnailUrl,
   });
 
   @override
-  State<SharePostSheet> createState() => _SharePostSheetState();
+  State<ShareReelSheet> createState() => _ShareReelSheetState();
 }
 
-class _SharePostSheetState extends State<SharePostSheet> {
+class _ShareReelSheetState extends State<ShareReelSheet> {
   bool _isSending = false;
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocus = FocusNode();
@@ -54,53 +58,6 @@ class _SharePostSheetState extends State<SharePostSheet> {
     return results;
   }
 
-  Future<void> _incrementShareCount() async {
-    await FirebaseFirestore.instance.collection("posts").doc(widget.postId).update(
-      {"shareCount": FieldValue.increment(1)},
-    );
-  }
-
-  Future<void> _sendTo(String targetUid) async {
-    try {
-      final fromUid = FirebaseAuth.instance.currentUser!.uid;
-      final chatId = _chatId(fromUid, targetUid);
-      await FirebaseFirestore.instance
-          .collection("chats")
-          .doc(chatId)
-          .collection("messages")
-          .add({
-            "type": "share_post",
-            "text": "",
-            "fromUid": fromUid,
-            "toUid": targetUid,
-            "postId": widget.postId,
-            "postUrl": widget.postUrl,
-            "postOwnerUid": widget.postOwnerUid,
-            "postOwnerUsername": widget.postOwnerUsername,
-            "postOwnerPhotoUrl": widget.postOwnerPhotoUrl,
-            "createdAt": FieldValue.serverTimestamp(),
-            "createdAtLocal": DateTime.now(),
-            "reactions": {},
-          });
-      await FirestoreMethods().addNotification(
-        toUid: targetUid,
-        fromUid: fromUid,
-        type: "share_post",
-        postId: widget.postId,
-        postUrl: widget.postUrl,
-        message: "Shared a post",
-      );
-      await _incrementShareCount();
-    } catch (e) {
-      rethrow;
-    }
-  }
-
-  String _chatId(String a, String b) {
-    final ids = [a, b]..sort();
-    return ids.join("_");
-  }
-
   Future<List<Map<String, dynamic>>> _followersFutureFor(List<String> ids) {
     final key = ids.join(",");
     if (_followersFuture == null || _followersKey != key) {
@@ -108,6 +65,47 @@ class _SharePostSheetState extends State<SharePostSheet> {
       _followersFuture = _loadUsers(ids);
     }
     return _followersFuture!;
+  }
+
+  String _chatId(String a, String b) {
+    final ids = [a, b]..sort();
+    return ids.join("_");
+  }
+
+  Future<void> _sendTo(String targetUid) async {
+    final fromUid = FirebaseAuth.instance.currentUser!.uid;
+    final chatId = _chatId(fromUid, targetUid);
+    await FirebaseFirestore.instance
+        .collection("chats")
+        .doc(chatId)
+        .collection("messages")
+        .add({
+          "type": "share_reel",
+          "text": "",
+          "fromUid": fromUid,
+          "toUid": targetUid,
+          "reelId": widget.reelId,
+          "reelUrl": widget.reelUrl,
+          "reelOwnerUid": widget.reelOwnerUid,
+          "reelOwnerUsername": widget.reelOwnerUsername,
+          "reelOwnerPhotoUrl": widget.reelOwnerPhotoUrl,
+          "reelCoverUrl": widget.reelCoverUrl,
+          "reelThumbnailUrl": widget.reelThumbnailUrl,
+          "createdAt": FieldValue.serverTimestamp(),
+          "createdAtLocal": DateTime.now(),
+          "reactions": {},
+        });
+    await FirestoreMethods().addNotification(
+      toUid: targetUid,
+      fromUid: fromUid,
+      type: "share_reel",
+      reelId: widget.reelId,
+      reelCoverUrl:
+          widget.reelCoverUrl.isNotEmpty
+              ? widget.reelCoverUrl
+              : widget.reelThumbnailUrl,
+      message: "Shared a reel",
+    );
   }
 
   @override
@@ -130,7 +128,7 @@ class _SharePostSheetState extends State<SharePostSheet> {
     const searchFill = Color(0xFFF2F2F2);
 
     return DraggableScrollableSheet(
-      initialChildSize: 0.6,
+      initialChildSize: 0.7,
       minChildSize: 0.4,
       maxChildSize: 0.9,
       builder: (context, scrollController) {

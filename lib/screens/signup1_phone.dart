@@ -56,18 +56,22 @@ class _SignupPhoneNoState extends State<SignupPhoneNo> {
               ),
               Padding(
                 padding: const EdgeInsets.only(top: 10, bottom: 10),
-                child: MyElevatedButton(onPressed: () {
-                  
-                },buttonText: "Next"),
+                child: MyElevatedButton(
+                  onPressed: () {},
+                  buttonText: "Next",
+                  bgClr: Colors.black,
+                  borderClr: Colors.black,
+                  textClr: Colors.white,
+                ),
               ),
               Padding(
                 padding: const EdgeInsets.only(top: 5),
-                child: MyElevatedButton(onPressed: () {
-                  
-                },
+                child: MyElevatedButton(
+                  onPressed: () {},
                   buttonText: "Sign up with email address",
-                  bgClr: mobileBackgroundColor,
-                  borderClr: secondaryColor,
+                  bgClr: Colors.black,
+                  borderClr: Colors.black,
+                  textClr: Colors.white,
                 ),
               ),
             ],
