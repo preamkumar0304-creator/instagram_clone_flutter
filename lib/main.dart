@@ -1,5 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:instagram_clone_flutter_firebase/firebase_options.dart';
@@ -11,12 +12,14 @@ import 'package:instagram_clone_flutter_firebase/responsive/web_screen_layout.da
 import 'package:instagram_clone_flutter_firebase/screens/login_screen.dart';
 import 'package:instagram_clone_flutter_firebase/utils/colors.dart';
 import 'package:instagram_clone_flutter_firebase/utils/app_usage_tracker.dart';
+import 'package:instagram_clone_flutter_firebase/services/notification_service.dart';
 import 'package:provider/provider.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await dotenv.load(fileName: "assets/.env");
   await Firebase.initializeApp(options:  DefaultFirebaseOptions.currentPlatform);
+  FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
   runApp(const MyApp());
 }
 
@@ -25,6 +28,7 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    NotificationService.instance.init();
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => UserProvider()),
@@ -68,6 +72,7 @@ class MyApp extends StatelessWidget {
           return MaterialApp(
             title: 'Instagram Clone',
             debugShowCheckedModeBanner: false,
+            navigatorKey: NotificationService.navigatorKey,
             themeMode:
                 themeProvider.isDarkMode ? ThemeMode.dark : ThemeMode.light, // ✅
             theme: baseTheme,

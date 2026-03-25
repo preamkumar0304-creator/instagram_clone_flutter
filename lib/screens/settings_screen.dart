@@ -57,9 +57,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     try {
       final snap =
           await FirebaseFirestore.instance
-              .collection("users")
-              .doc(uid)
               .collection("notifications")
+              .where("receiverId", isEqualTo: uid)
               .where("isRead", isEqualTo: false)
               .get();
       if (snap.docs.isEmpty) return;
@@ -114,9 +113,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
             stream:
                 FirebaseFirestore.instance
-                    .collection("users")
-                    .doc(uid)
                     .collection("notifications")
+                    .where("receiverId", isEqualTo: uid)
                     .where("isRead", isEqualTo: false)
                     .limit(1)
                     .snapshots(),

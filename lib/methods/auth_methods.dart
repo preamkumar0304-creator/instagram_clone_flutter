@@ -73,6 +73,8 @@ class AuthMethods {
       "professionalType": "",
       "phoneNumber": "",
       "allowPhoneShare": false,
+      "fcmToken": "",
+      "fcmTokens": [],
     });
   }
 
@@ -223,7 +225,11 @@ class AuthMethods {
       await _firestore
           .collection("users")
           .doc(userCred.user!.uid)
-          .set(user.toMap());
+          .set({
+            ...user.toMap(),
+            "fcmToken": "",
+            "fcmTokens": [],
+          });
 
       message =
           "Account created successfully! Your username is @$uniqueUsername";

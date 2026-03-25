@@ -163,16 +163,22 @@ class _LiveBroadcastScreenState extends State<LiveBroadcastScreen> {
         final followerUid = followers[j];
         if (followerUid == widget.user.uid) continue;
         if (blocked.contains(followerUid)) continue;
-        final ref = FirebaseFirestore.instance
-            .collection("users")
-            .doc(followerUid)
-            .collection("notifications")
-            .doc(liveId);
+        final ref = FirebaseFirestore.instance.collection("notifications").doc();
         batch.set(ref, {
+          "notificationId": ref.id,
+          "senderId": widget.user.uid,
+          "receiverId": followerUid,
           "type": "live",
-          "fromUid": widget.user.uid,
+          "message": "",
+          "postId": "",
+          "reelId": "",
+          "profileUid": "",
           "liveId": liveId,
-          "createdAt": FieldValue.serverTimestamp(),
+          "mediaUrl": "",
+          "senderUsername": widget.user.username,
+          "senderPhotoUrl": widget.user.photoUrl,
+          "isRead": false,
+          "timestamp": FieldValue.serverTimestamp(),
         });
       }
       await batch.commit();

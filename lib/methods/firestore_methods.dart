@@ -302,27 +302,39 @@ class FirestoreMethods {
     String? reelCoverUrl,
     String? profileUid,
     String? profilePhotoUrl,
+    String? liveId,
   }) async {
     if (toUid.isEmpty || fromUid.isEmpty || toUid == fromUid) return;
     try {
-      await _firestore
-          .collection("users")
-          .doc(toUid)
-          .collection("notifications")
-          .add({
-            "type": type,
-            "fromUid": fromUid,
-            "toUid": toUid,
-            "message": message ?? "",
-            "postId": postId ?? "",
-            "postUrl": postUrl ?? "",
-            "reelId": reelId ?? "",
-            "reelCoverUrl": reelCoverUrl ?? "",
-            "profileUid": profileUid ?? "",
-            "profilePhotoUrl": profilePhotoUrl ?? "",
-            "createdAt": FieldValue.serverTimestamp(),
-            "isRead": false,
-          });
+      final senderSnap =
+          await _firestore.collection("users").doc(fromUid).get();
+      final senderData = senderSnap.data() ?? {};
+      final senderUsername = (senderData["username"] ?? "").toString();
+      final senderPhotoUrl = (senderData["photoUrl"] ?? "").toString();
+      final mediaUrl =
+          (reelCoverUrl ?? "").isNotEmpty
+              ? reelCoverUrl!
+              : (postUrl ?? "").isNotEmpty
+                  ? postUrl!
+                  : (profilePhotoUrl ?? "");
+
+      final docRef = _firestore.collection("notifications").doc();
+      await docRef.set({
+        "notificationId": docRef.id,
+        "senderId": fromUid,
+        "receiverId": toUid,
+        "type": type,
+        "message": message ?? "",
+        "postId": postId ?? "",
+        "reelId": reelId ?? "",
+        "profileUid": profileUid ?? "",
+        "liveId": liveId ?? "",
+        "mediaUrl": mediaUrl,
+        "senderUsername": senderUsername,
+        "senderPhotoUrl": senderPhotoUrl,
+        "isRead": false,
+        "timestamp": FieldValue.serverTimestamp(),
+      });
     } catch (_) {}
   }
 

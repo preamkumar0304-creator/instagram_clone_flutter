@@ -1,33 +1,31 @@
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:instagram_clone_flutter_firebase/methods/firestore_methods.dart';
-import 'package:instagram_clone_flutter_firebase/screens/profile_screen.dart';
 import 'package:instagram_clone_flutter_firebase/screens/live_viewer_screen.dart';
+import 'package:instagram_clone_flutter_firebase/screens/post_profile.dart';
+import 'package:instagram_clone_flutter_firebase/screens/profile_screen.dart';
+import 'package:instagram_clone_flutter_firebase/screens/reels_screen.dart';
 import 'package:instagram_clone_flutter_firebase/utils/colors.dart';
 import 'package:instagram_clone_flutter_firebase/utils/utils.dart';
 
-class ActivityScreen extends StatelessWidget {
+class ActivityScreen extends StatefulWidget {
   const ActivityScreen({super.key});
+
+  @override
+  State<ActivityScreen> createState() => _ActivityScreenState();
+}
+
+class _ActivityScreenState extends State<ActivityScreen> {
+  int _limit = 20;
+  bool _markedRead = false;
 
   DateTime? _parseDateTime(dynamic value) {
     if (value == null) return null;
     if (value is Timestamp) return value.toDate();
     if (value is DateTime) return value;
     return null;
-  }
-
-  Map<String, DateTime> _parseTimestampMap(dynamic value) {
-    if (value is! Map) return {};
-    final result = <String, DateTime>{};
-    value.forEach((key, raw) {
-      if (key is! String) return;
-      final parsed = _parseDateTime(raw);
-      if (parsed != null) {
-        result[key] = parsed;
-      }
-    });
-    return result;
   }
 
   String _bucketFor(DateTime now, DateTime? time) {
@@ -46,6 +44,34 @@ class ActivityScreen extends StatelessWidget {
       return "This Week";
     }
     return "Earlier";
+  }
+
+  String _timeAgo(DateTime? time) {
+    if (time == null) return "";
+    final now = DateTime.now();
+    final diff = now.difference(time);
+    if (diff.inMinutes < 1) return "Just now";
+    if (diff.inMinutes < 60) return "${diff.inMinutes}m";
+    if (diff.inHours < 24) return "${diff.inHours}h";
+    if (diff.inDays < 7) return "${diff.inDays}d";
+    return "${time.month}/${time.day}/${time.year}";
+  }
+
+  Future<void> _markAllRead(String uid) async {
+    try {
+      final snap =
+          await FirebaseFirestore.instance
+              .collection("notifications")
+              .where("receiverId", isEqualTo: uid)
+              .where("isRead", isEqualTo: false)
+              .get();
+      if (snap.docs.isEmpty) return;
+      final batch = FirebaseFirestore.instance.batch();
+      for (final doc in snap.docs) {
+        batch.update(doc.reference, {"isRead": true});
+      }
+      await batch.commit();
+    } catch (_) {}
   }
 
   Widget _sectionHeader(String label) {
@@ -75,23 +101,216 @@ class ActivityScreen extends StatelessWidget {
     );
   }
 
-  Future<Map<String, Map<String, dynamic>>> _loadUsers(
-    List<String> ids,
-  ) async {
-    if (ids.isEmpty) return {};
-    final Map<String, Map<String, dynamic>> results = {};
-    for (var i = 0; i < ids.length; i += 10) {
-      final chunk = ids.sublist(i, i + 10 > ids.length ? ids.length : i + 10);
-      final snap =
-          await FirebaseFirestore.instance
-              .collection("users")
-              .where(FieldPath.documentId, whereIn: chunk)
-              .get();
-      for (final doc in snap.docs) {
-        results[doc.id] = doc.data();
+  List<_DisplayNotification> _batchItems(List<_NotificationItem> items) {
+    final result = <_DisplayNotification>[];
+    final used = <String>{};
+    for (final item in items) {
+      if (used.contains(item.id)) continue;
+      if (_isBatchable(item)) {
+        final group =
+            items
+                .where(
+                  (other) =>
+                      !used.contains(other.id) &&
+                      other.type == item.type &&
+                      other.postId == item.postId &&
+                      item.postId.isNotEmpty,
+                )
+                .toList();
+        if (group.length > 1) {
+          used.addAll(group.map((e) => e.id));
+          result.add(_DisplayNotification(group));
+          continue;
+        }
+      }
+      used.add(item.id);
+      result.add(_DisplayNotification([item]));
+    }
+    return result;
+  }
+
+  bool _isBatchable(_NotificationItem item) {
+    return (item.type == "like" ||
+            item.type == "comment" ||
+            item.type == "share_post") &&
+        item.postId.isNotEmpty;
+  }
+
+  String _titleFor(_DisplayNotification display) {
+    final first = display.items.first;
+    if (display.count > 1) {
+      if (first.type == "like") {
+        return "${display.count} people liked your post";
+      }
+      if (first.type == "comment") {
+        return "${display.count} people commented on your post";
+      }
+      if (first.type == "share_post") {
+        return "${display.count} people shared your post";
       }
     }
-    return results;
+
+    final username = first.senderUsername.isNotEmpty
+        ? first.senderUsername
+        : "Someone";
+    switch (first.type) {
+      case "like":
+        return "$username liked your post";
+      case "comment":
+        return "$username commented on your post";
+      case "message":
+        return "$username sent you a message";
+      case "follow":
+        return "$username started following you";
+      case "follow_request":
+        return "$username requested to follow you";
+      case "follow_accept":
+        return "$username accepted your follow request";
+      case "share_post":
+        return "$username shared your post";
+      case "share_reel":
+        return "$username shared a reel";
+      case "share_profile":
+        return "$username shared a profile";
+      case "live":
+        return "$username is live now";
+      default:
+        return "$username sent you a notification";
+    }
+  }
+
+  String _subtitleFor(_DisplayNotification display) {
+    final first = display.items.first;
+    if (display.count > 1) return _timeAgo(first.timestamp);
+    final time = _timeAgo(first.timestamp);
+    final detail =
+        first.type == "comment" || first.type == "message"
+            ? first.message
+            : "";
+    if (detail.isEmpty) return time;
+    if (time.isEmpty) return detail;
+    return "$detail ? $time";
+  }
+
+  Future<void> _markRead(String notificationId) async {
+    if (notificationId.isEmpty) return;
+    try {
+      await FirebaseFirestore.instance
+          .collection("notifications")
+          .doc(notificationId)
+          .update({"isRead": true});
+    } catch (_) {}
+  }
+
+  void _openNotification(_NotificationItem item) {
+    _markRead(item.id);
+    if (item.type == "follow" ||
+        item.type == "follow_request" ||
+        item.type == "follow_accept") {
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => ProfileScreen(uid: item.senderId)),
+      );
+      return;
+    }
+
+    if (item.type == "share_profile" && item.profileUid.isNotEmpty) {
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => ProfileScreen(uid: item.profileUid)),
+      );
+      return;
+    }
+
+    if (item.type == "live" && item.liveId.isNotEmpty) {
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => LiveViewerScreen(liveId: item.liveId)),
+      );
+      return;
+    }
+
+    if (item.type == "share_reel") {
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const ReelsScreen()),
+      );
+      return;
+    }
+
+    if (item.type == "like" ||
+        item.type == "comment" ||
+        item.type == "share_post") {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => PostDetailScreen(uid: item.receiverId),
+        ),
+      );
+      return;
+    }
+  }
+
+  Widget _leadingAvatar(_NotificationItem item) {
+    if (item.senderPhotoUrl.isEmpty) {
+      return const CircleAvatar(
+        child: Icon(Icons.person, color: Colors.white),
+      );
+    }
+    return CircleAvatar(backgroundImage: NetworkImage(item.senderPhotoUrl));
+  }
+
+  Widget? _trailingFor(_DisplayNotification display) {
+    final first = display.items.first;
+    if (first.type == "follow_request") {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextButton(
+            onPressed: () async {
+              await FirestoreMethods().acceptFollowRequest(
+                currentUid: first.receiverId,
+                requesterUid: first.senderId,
+              );
+              if (mounted) {
+                showSnackBar(
+                  context: context,
+                  content: "Request accepted.",
+                  clr: successColor,
+                );
+              }
+            },
+            child: const Text("Accept"),
+          ),
+          const SizedBox(width: 6),
+          OutlinedButton(
+            onPressed: () async {
+              await FirestoreMethods().declineFollowRequest(
+                currentUid: first.receiverId,
+                requesterUid: first.senderId,
+              );
+              if (mounted) {
+                showSnackBar(
+                  context: context,
+                  content: "Request declined.",
+                  clr: secondaryColor,
+                );
+              }
+            },
+            child: const Text("Decline"),
+          ),
+        ],
+      );
+    }
+
+    if (first.mediaUrl.isNotEmpty) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(6),
+        child: Image.network(
+          first.mediaUrl,
+          width: 44,
+          height: 44,
+          fit: BoxFit.cover,
+        ),
+      );
+    }
+
+    return null;
   }
 
   @override
@@ -107,415 +326,124 @@ class ActivityScreen extends StatelessWidget {
       backgroundColor: mobileBackgroundColor,
       appBar: AppBar(
         backgroundColor: mobileBackgroundColor,
-        title: const Text("Activity", style: TextStyle(color: primaryColor)),
+        title: const Text("Notifications", style: TextStyle(color: primaryColor)),
       ),
-      body: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
         stream:
             FirebaseFirestore.instance
-                .collection("users")
-                .doc(currentUid)
+                .collection("notifications")
+                .where("receiverId", isEqualTo: currentUid)
+                .orderBy("timestamp", descending: true)
+                .limit(_limit)
                 .snapshots(),
-        builder: (context, userSnap) {
-          final userData = userSnap.data?.data() ?? {};
-          final followers =
-              (userData["followers"] as List?)?.whereType<String>().toList() ??
-              [];
-          final followRequests =
-              (userData["followRequests"] as List?)?.whereType<String>().toList() ??
-              [];
-          final blocked =
-              (userData["blockedUsers"] as List?)?.whereType<String>().toList() ??
-              [];
-          final followRequestTimes =
-              _parseTimestampMap(userData["followRequestTimes"]);
-          final followerTimes = _parseTimestampMap(userData["followerTimes"]);
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(
+              child: CircularProgressIndicator(color: primaryColor),
+            );
+          }
 
-          return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-            stream:
-                FirebaseFirestore.instance
-                    .collection("posts")
-                    .where("uid", isEqualTo: currentUid)
-                    .orderBy("postedDate", descending: true)
-                    .snapshots(),
-            builder: (context, postSnap) {
-              if (postSnap.connectionState == ConnectionState.waiting) {
-                return const Center(
-                  child: CircularProgressIndicator(color: primaryColor),
-                );
-              }
+          final docs = snapshot.data?.docs ?? [];
+          if (docs.isEmpty) {
+            return const Center(
+              child: Text(
+                "No notifications yet.",
+                style: TextStyle(color: primaryColor),
+              ),
+            );
+          }
 
-              return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                stream:
-                    FirebaseFirestore.instance
-                        .collection("users")
-                        .doc(currentUid)
-                        .collection("notifications")
-                        .orderBy("createdAt", descending: true)
-                        .limit(20)
-                        .snapshots(),
-                builder: (context, notifSnap) {
-                  final posts = postSnap.data?.docs ?? [];
-                  final List<_ActivityItem> items = [];
-                  final Set<String> userIds = {};
+          final items =
+              docs.map((doc) => _NotificationItem.fromDoc(doc)).toList();
+          if (!_markedRead) {
+            _markedRead = true;
+            _markAllRead(currentUid);
+          }
 
-                  final notifications = notifSnap.data?.docs ?? [];
-                  for (final doc in notifications) {
-                    final data = doc.data();
-                    final type = (data["type"] ?? "").toString();
-                    final fromUid = (data["fromUid"] ?? "").toString();
-                    final createdAt = _parseDateTime(data["createdAt"]);
-                    if (fromUid.isEmpty) continue;
-                    if (type == "live") {
-                      final liveId = (data["liveId"] ?? doc.id).toString();
-                      if (liveId.isEmpty) continue;
-                      items.add(
-                        _ActivityItem.live(
-                          uid: fromUid,
-                          liveId: liveId,
-                          activityAt: createdAt,
-                        ),
-                      );
-                      userIds.add(fromUid);
-                    } else if (type == "comment") {
-                      items.add(
-                        _ActivityItem.comment(
-                          uid: fromUid,
-                          postUrl: (data["postUrl"] ?? "").toString(),
-                          detail: (data["message"] ?? "").toString(),
-                          activityAt: createdAt,
-                        ),
-                      );
-                      userIds.add(fromUid);
-                    } else if (type == "message") {
-                      items.add(
-                        _ActivityItem.message(
-                          uid: fromUid,
-                          detail: (data["message"] ?? "").toString(),
-                          activityAt: createdAt,
-                        ),
-                      );
-                      userIds.add(fromUid);
-                    } else if (type == "share_post") {
-                      items.add(
-                        _ActivityItem.share(
-                          uid: fromUid,
-                          postUrl: (data["postUrl"] ?? "").toString(),
-                          detail: "Shared a post",
-                          activityAt: createdAt,
-                        ),
-                      );
-                      userIds.add(fromUid);
-                    } else if (type == "share_reel") {
-                      items.add(
-                        _ActivityItem.share(
-                          uid: fromUid,
-                          postUrl: (data["reelCoverUrl"] ?? "").toString(),
-                          detail: "Shared a reel",
-                          activityAt: createdAt,
-                        ),
-                      );
-                      userIds.add(fromUid);
-                    } else if (type == "share_profile") {
-                      items.add(
-                        _ActivityItem.share(
-                          uid: fromUid,
-                          postUrl: (data["profilePhotoUrl"] ?? "").toString(),
-                          detail: "Shared a profile",
-                          activityAt: createdAt,
-                        ),
-                      );
-                      userIds.add(fromUid);
-                    } else if (type == "follow_accept") {
-                      items.add(
-                        _ActivityItem.followAccept(
-                          uid: fromUid,
-                          activityAt: createdAt,
-                        ),
-                      );
-                      userIds.add(fromUid);
-                    }
-                  }
+          final now = DateTime.now();
+          final sections = <String, List<_NotificationItem>>{};
+          for (final item in items) {
+            final label = _bucketFor(now, item.timestamp);
+            sections.putIfAbsent(label, () => []).add(item);
+          }
 
-                  // Follow requests (private accounts)
-                  for (final uid in followRequests) {
-                    if (uid == currentUid) continue;
-                    if (blocked.contains(uid)) continue;
-                    if (followers.contains(uid)) continue;
-                    items.add(
-                      _ActivityItem.followRequest(
-                        uid: uid,
-                        activityAt: followRequestTimes[uid],
+          final orderedLabels = ["Today", "Yesterday", "This Week", "Earlier"];
+          final children = <Widget>[];
+          for (final label in orderedLabels) {
+            final sectionItems = sections[label] ?? [];
+            if (sectionItems.isEmpty) continue;
+            children.add(_sectionHeader(label));
+            final displayItems = _batchItems(sectionItems);
+            for (final display in displayItems) {
+              final first = display.items.first;
+              final isUnread = display.items.any((e) => !e.isRead);
+              children.add(
+                Container(
+                  margin: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: isUnread
+                        ? mobileSearchColor.withOpacity(0.7)
+                        : Colors.white,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: secondaryColor.withOpacity(0.2),
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.04),
+                        blurRadius: 6,
+                        offset: const Offset(0, 2),
                       ),
-                    );
-                    userIds.add(uid);
-                  }
-
-                  // Followers
-                  for (final uid in followers) {
-                    if (uid == currentUid) continue;
-                    items.add(
-                      _ActivityItem.follow(
-                        uid: uid,
-                        activityAt: followerTimes[uid],
-                      ),
-                    );
-                    userIds.add(uid);
-                  }
-
-                  // Likes on your posts
-                  for (final doc in posts) {
-                    final data = doc.data();
-                    final postUrl = (data["postUrl"] ?? "") as String;
-                    final postedAt = _parseDateTime(data["postedDate"]);
-                    final likes =
-                        (data["likes"] as List?)?.whereType<String>().toList() ??
-                        [];
-                    for (final liker in likes) {
-                      if (liker == currentUid) continue;
-                      items.add(
-                        _ActivityItem.like(
-                          uid: liker,
-                          postUrl: postUrl,
-                          activityAt: postedAt,
-                        ),
-                      );
-                      userIds.add(liker);
-                    }
-                  }
-
-                  if (items.isEmpty) {
-                    return const Center(
-                      child: Text(
-                        "No activity yet.",
-                        style: TextStyle(color: primaryColor),
-                      ),
-                    );
-                  }
-
-                  return FutureBuilder<Map<String, Map<String, dynamic>>>(
-                    future: _loadUsers(userIds.toList()),
-                    builder: (context, usersSnap) {
-                      if (usersSnap.connectionState == ConnectionState.waiting) {
-                        return const Center(
-                          child: CircularProgressIndicator(color: primaryColor),
-                        );
-                      }
-                      final users = usersSnap.data ?? {};
-                      items.sort((a, b) {
-                        final aTime = a.activityAt;
-                        final bTime = b.activityAt;
-                        if (aTime == null && bTime == null) return 0;
-                        if (aTime == null) return 1;
-                        if (bTime == null) return -1;
-                        return bTime.compareTo(aTime);
-                      });
-
-                      final now = DateTime.now();
-                      final sections = <String, List<_ActivityItem>>{};
-                      for (final item in items) {
-                        final label = _bucketFor(now, item.activityAt);
-                        sections.putIfAbsent(label, () => []).add(item);
-                      }
-
-                      final orderedLabels = [
-                        "Today",
-                        "Yesterday",
-                        "This Week",
-                        "Earlier",
-                      ];
-                      final children = <Widget>[];
-                      for (final label in orderedLabels) {
-                        final sectionItems = sections[label] ?? [];
-                        if (sectionItems.isEmpty) continue;
-                        children.add(_sectionHeader(label));
-                        for (final item in sectionItems) {
-                          final user = users[item.uid] ?? {};
-                          final username =
-                              (user["username"] ?? "user") as String;
-                          final photoUrl = (user["photoUrl"] ?? "") as String;
-                          children.add(
-                            Container(
-                              margin: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 6,
-                              ),
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(14),
-                                border: Border.all(
-                                  color: secondaryColor.withOpacity(0.2),
-                                ),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withOpacity(0.04),
-                                    blurRadius: 6,
-                                    offset: const Offset(0, 2),
-                                  ),
-                                ],
-                              ),
-                              child: ListTile(
-                                contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 4,
-                                ),
-                                onTap: () {
-                                  if (item.type == _ActivityType.live &&
-                                      item.liveId.isNotEmpty) {
-                                    Navigator.of(context).push(
-                                      MaterialPageRoute(
-                                        builder:
-                                            (_) => LiveViewerScreen(
-                                              liveId: item.liveId,
-                                            ),
-                                      ),
-                                    );
-                                    return;
-                                  }
-                                  Navigator.of(context).push(
-                                    MaterialPageRoute(
-                                      builder:
-                                          (_) => ProfileScreen(uid: item.uid),
-                                    ),
-                                  );
-                                },
-                                leading: CircleAvatar(
-                                  backgroundImage:
-                                      photoUrl.isNotEmpty
-                                          ? NetworkImage(photoUrl)
-                                          : null,
-                                  child:
-                                      photoUrl.isEmpty
-                                          ? const Icon(
-                                            Icons.person,
-                                            color: Colors.white,
-                                          )
-                                          : null,
-                                ),
-                                title: Text(
-                                  item.type == _ActivityType.followRequest
-                                      ? "$username requested to follow you"
-                                      : item.type == _ActivityType.follow
-                                          ? "$username started following you"
-                                          : item.type == _ActivityType.followAccept
-                                              ? "$username accepted your follow request"
-                                              : item.type == _ActivityType.like
-                                                  ? "$username liked your post"
-                                                  : item.type == _ActivityType.comment
-                                                      ? "$username commented on your post"
-                                                      : item.type == _ActivityType.message
-                                                          ? "$username sent you a message"
-                                                          : item.type == _ActivityType.share
-                                                              ? "$username shared something with you"
-                                                              : "$username is live now",
-                                  style:
-                                      const TextStyle(color: primaryColor),
-                                ),
-                                subtitle:
-                                    item.detail.isNotEmpty
-                                        ? Text(
-                                          item.detail,
-                                          style: const TextStyle(
-                                            color: secondaryColor,
-                                          ),
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                        )
-                                        : null,
-                                trailing:
-                                    item.type == _ActivityType.followRequest
-                                        ? Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            TextButton(
-                                              onPressed: () async {
-                                                await FirestoreMethods()
-                                                    .acceptFollowRequest(
-                                                      currentUid: currentUid,
-                                                      requesterUid: item.uid,
-                                                    );
-                                                if (context.mounted) {
-                                                  showSnackBar(
-                                                    context: context,
-                                                    content:
-                                                        "Request accepted.",
-                                                    clr: successColor,
-                                                  );
-                                                }
-                                              },
-                                              child: const Text("Accept"),
-                                            ),
-                                            const SizedBox(width: 6),
-                                            OutlinedButton(
-                                              onPressed: () async {
-                                                await FirestoreMethods()
-                                                    .declineFollowRequest(
-                                                      currentUid: currentUid,
-                                                      requesterUid: item.uid,
-                                                    );
-                                                if (context.mounted) {
-                                                  showSnackBar(
-                                                    context: context,
-                                                    content:
-                                                        "Request declined.",
-                                                    clr: secondaryColor,
-                                                  );
-                                                }
-                                              },
-                                              child: const Text("Decline"),
-                                            ),
-                                          ],
-                                        )
-                                        : (item.type == _ActivityType.like ||
-                                                item.type == _ActivityType.comment ||
-                                                item.type == _ActivityType.share) &&
-                                            item.postUrl.isNotEmpty
-                                            ? ClipRRect(
-                                              borderRadius:
-                                                  BorderRadius.circular(6),
-                                              child: Image.network(
-                                                item.postUrl,
-                                                width: 44,
-                                                height: 44,
-                                                fit: BoxFit.cover,
-                                              ),
-                                            )
-                                            : item.type == _ActivityType.live
-                                                ? Container(
-                                                  padding:
-                                                      const EdgeInsets.symmetric(
-                                                        horizontal: 8,
-                                                        vertical: 4,
-                                                      ),
-                                                  decoration: BoxDecoration(
-                                                    color: Colors.red,
-                                                    borderRadius:
-                                                        BorderRadius.circular(6),
-                                                  ),
-                                                  child: const Text(
-                                                    "LIVE",
-                                                    style: TextStyle(
-                                                      color: Colors.white,
-                                                      fontWeight: FontWeight.bold,
-                                                      fontSize: 12,
-                                                    ),
-                                                  ),
-                                                )
-                                                : null,
-                              ),
-                            ),
-                          );
-                        }
-                      }
-
-                      return ListView(
-                        padding: const EdgeInsets.only(bottom: 16),
-                        children: children,
-                      );
-                    },
-                  );
-                },
+                    ],
+                  ),
+                  child: ListTile(
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 4,
+                    ),
+                    onTap: () => _openNotification(first),
+                    leading: _leadingAvatar(first),
+                    title: Text(
+                      _titleFor(display),
+                      style: const TextStyle(color: primaryColor),
+                    ),
+                    subtitle: Text(
+                      _subtitleFor(display),
+                      style: const TextStyle(color: secondaryColor),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    trailing: _trailingFor(display),
+                  ),
+                ),
               );
-            },
+            }
+          }
+
+          if (docs.length >= _limit) {
+            children.add(
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Center(
+                  child: OutlinedButton(
+                    onPressed: () {
+                      setState(() {
+                        _limit += 20;
+                      });
+                    },
+                    child: const Text("Load more"),
+                  ),
+                ),
+              ),
+            );
+          }
+
+          return ListView(
+            padding: const EdgeInsets.only(bottom: 16),
+            children: children,
           );
         },
       ),
@@ -523,84 +451,73 @@ class ActivityScreen extends StatelessWidget {
   }
 }
 
-enum _ActivityType {
-  follow,
-  like,
-  live,
-  followRequest,
-  followAccept,
-  comment,
-  message,
-  share,
+class _NotificationItem {
+  final String id;
+  final String senderId;
+  final String receiverId;
+  final String type;
+  final String message;
+    final String postId;
+    final String reelId;
+    final String liveId;
+    final String profileUid;
+    final String mediaUrl;
+  final String senderUsername;
+  final String senderPhotoUrl;
+  final DateTime? timestamp;
+  final bool isRead;
+
+  _NotificationItem({
+    required this.id,
+    required this.senderId,
+    required this.receiverId,
+    required this.type,
+    required this.message,
+    required this.postId,
+    required this.reelId,
+    required this.liveId,
+    required this.profileUid,
+    required this.mediaUrl,
+    required this.senderUsername,
+    required this.senderPhotoUrl,
+    required this.timestamp,
+    required this.isRead,
+  });
+
+  factory _NotificationItem.fromDoc(
+    DocumentSnapshot<Map<String, dynamic>> doc,
+  ) {
+    final data = doc.data() ?? {};
+    return _NotificationItem(
+      id: doc.id,
+      senderId: (data["senderId"] ?? "").toString(),
+      receiverId: (data["receiverId"] ?? "").toString(),
+      type: (data["type"] ?? "").toString(),
+      message: (data["message"] ?? "").toString(),
+      postId: (data["postId"] ?? "").toString(),
+      reelId: (data["reelId"] ?? "").toString(),
+      liveId: (data["liveId"] ?? "").toString(),
+      profileUid: (data["profileUid"] ?? "").toString(),
+      mediaUrl: (data["mediaUrl"] ?? "").toString(),
+      senderUsername: (data["senderUsername"] ?? "").toString(),
+      senderPhotoUrl: (data["senderPhotoUrl"] ?? "").toString(),
+      timestamp: _parseTimestamp(data["timestamp"]),
+      isRead: data["isRead"] == true,
+    );
+  }
+
+  static DateTime? _parseTimestamp(dynamic value) {
+    if (value == null) return null;
+    if (value is Timestamp) return value.toDate();
+    if (value is DateTime) return value;
+    return null;
+  }
 }
 
-class _ActivityItem {
-  final _ActivityType type;
-  final String uid;
-  final String postUrl;
-  final String liveId;
-  final String detail;
-  final DateTime? activityAt;
+class _DisplayNotification {
+  final List<_NotificationItem> items;
 
-  _ActivityItem.follow({required this.uid, required this.activityAt})
-      : type = _ActivityType.follow,
-        postUrl = "",
-        liveId = "",
-        detail = "";
+  _DisplayNotification(this.items);
 
-  _ActivityItem.followRequest({required this.uid, required this.activityAt})
-      : type = _ActivityType.followRequest,
-        postUrl = "",
-        liveId = "",
-        detail = "";
-
-  _ActivityItem.like({
-    required this.uid,
-    required this.postUrl,
-    required this.activityAt,
-  })
-      : type = _ActivityType.like,
-        liveId = "",
-        detail = "";
-
-  _ActivityItem.live({
-    required this.uid,
-    required this.liveId,
-    required this.activityAt,
-  })
-      : type = _ActivityType.live,
-        postUrl = "",
-        detail = "";
-
-  _ActivityItem.comment({
-    required this.uid,
-    required this.postUrl,
-    required this.detail,
-    required this.activityAt,
-  }) : type = _ActivityType.comment,
-        liveId = "";
-
-  _ActivityItem.message({
-    required this.uid,
-    required this.detail,
-    required this.activityAt,
-  })  : type = _ActivityType.message,
-        postUrl = "",
-        liveId = "";
-
-  _ActivityItem.share({
-    required this.uid,
-    required this.postUrl,
-    required this.detail,
-    required this.activityAt,
-  }) : type = _ActivityType.share,
-        liveId = "";
-
-  _ActivityItem.followAccept({
-    required this.uid,
-    required this.activityAt,
-  })  : type = _ActivityType.followAccept,
-        postUrl = "",
-        liveId = "",
-        detail = "";
+  int get count => items.length;
 }
