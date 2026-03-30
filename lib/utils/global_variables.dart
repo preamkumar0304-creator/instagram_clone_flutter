@@ -10,9 +10,9 @@ const webScreenSize = 600;
 final ValueNotifier<int> storyRefreshNotifier = ValueNotifier<int>(0);
 
 List<Widget> homeScreenItems(String uid) => [
-  FeedScreen(),
+  const FeedScreen(),
+  SearchScreen(),
   const ReelsScreen(),
   const MessagesScreen(),
-  SearchScreen(),
   ProfileScreen(uid: uid),
 ];

@@ -242,7 +242,6 @@ class _PostCardState extends State<PostCard> {
     final isOwner = user != null && user.uid == ownerUid;
     final isFollowing = user?.following.contains(ownerUid) ?? false;
     final shareCount = _safeInt(widget.snap["shareCount"]);
-    final actionDividerColor = secondaryColor.withOpacity(0.3);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 12),
       child: Column(
@@ -284,7 +283,7 @@ class _PostCardState extends State<PostCard> {
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
                             color: primaryColor,
-                            fontSize: 16,
+                            fontSize: 14,
                             fontWeight: FontWeight.bold,
                           ),
                         ),
@@ -296,7 +295,7 @@ class _PostCardState extends State<PostCard> {
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
                               color: secondaryColor,
-                              fontSize: 12,
+                              fontSize: 11,
                             ),
                           ),
                         ],
@@ -491,7 +490,8 @@ class _PostCardState extends State<PostCard> {
             padding: const EdgeInsets.symmetric(horizontal: 12),
             child: Row(
               children: [
-                GestureDetector(
+                _ActionCount(
+                  count: widget.snap["likes"].length.toString(),
                   onTap: () async {
                     await FirestoreMethods().likePost(
                       widget.snap["postId"],
@@ -504,52 +504,37 @@ class _PostCardState extends State<PostCard> {
                     smallLike: true,
                     child:
                         widget.snap["likes"].contains(user.uid)
-                            ? Icon(Icons.favorite, color: errorColor, size: 28)
-                            : Icon(Icons.favorite_border, color: primaryColor),
+                            ? const Icon(
+                              Icons.favorite,
+                              color: errorColor,
+                              size: 24,
+                            )
+                            : const Icon(
+                              Icons.favorite_border,
+                              color: primaryColor,
+                              size: 24,
+                            ),
                   ),
                 ),
-                const SizedBox(width: 6),
-                MyText(
-                  text: "${widget.snap["likes"].length}",
-                  textClr: primaryColor,
-                  textSize: 12,
-                ),
-                const SizedBox(width: 10),
-                Container(width: 1, height: 18, color: actionDividerColor),
-                const SizedBox(width: 10),
-                GestureDetector(
+                const SizedBox(width: 18),
+                _ActionCount(
+                  count: commentL.toString(),
                   onTap: _openComments,
                   child: const Icon(
                     Icons.messenger_outline,
                     color: primaryColor,
-                    size: 28,
+                    size: 24,
                   ),
                 ),
-                const SizedBox(width: 6),
-                GestureDetector(
-                  onTap: _openComments,
-                  child: MyText(
-                    text: commentL.toString(),
-                    textClr: primaryColor,
-                    textSize: 12,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Container(width: 1, height: 18, color: actionDividerColor),
-                const SizedBox(width: 10),
-                GestureDetector(
+                const SizedBox(width: 18),
+                _ActionCount(
+                  count: shareCount.toString(),
                   onTap: _openShareSheet,
                   child: const Icon(
                     Icons.send_outlined,
                     color: primaryColor,
-                    size: 28,
+                    size: 24,
                   ),
-                ),
-                const SizedBox(width: 6),
-                MyText(
-                  text: shareCount.toString(),
-                  textClr: primaryColor,
-                  textSize: 12,
                 ),
                 const Spacer(),
                 IconButton(
@@ -572,7 +557,7 @@ class _PostCardState extends State<PostCard> {
                         ? Icons.bookmark_rounded
                         : Icons.bookmark_border_rounded,
                     color: primaryColor,
-                    size: 28,
+                    size: 24,
                   ),
                 ),
               ],
@@ -591,12 +576,15 @@ class _PostCardState extends State<PostCard> {
                         style: TextStyle(
                           color: primaryColor,
                           fontWeight: FontWeight.bold,
-                          fontSize: 16,
+                          fontSize: 14,
                         ),
                       ),
                       TextSpan(
                         text: "  ${widget.snap["caption"]}",
-                        style: TextStyle(fontSize: 16),
+                        style: const TextStyle(
+                          color: primaryColor,
+                          fontSize: 14,
+                        ),
                       ),
                     ],
                   ),
@@ -613,11 +601,45 @@ class _PostCardState extends State<PostCard> {
                   widget.snap["postedDate"].toDate(),
                 ),
                 textClr: secondaryColor,
-                textSize: 12,
+                textSize: 11,
               ),
             ),
           ),
           const SizedBox(height: 6),
+        ],
+      ),
+    );
+  }
+}
+
+class _ActionCount extends StatelessWidget {
+  final Widget child;
+  final String count;
+  final VoidCallback onTap;
+
+  const _ActionCount({
+    required this.child,
+    required this.count,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          child,
+          const SizedBox(height: 4),
+          Text(
+            count,
+            style: const TextStyle(
+              color: secondaryColor,
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
         ],
       ),
     );

@@ -1,6 +1,5 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_svg/svg.dart';
 import 'package:instagram_clone_flutter_firebase/providers/user_provider.dart';
 import 'package:instagram_clone_flutter_firebase/utils/colors.dart';
 import 'package:instagram_clone_flutter_firebase/utils/global_variables.dart';
@@ -56,11 +55,18 @@ class _WebScreenLayoutState extends State<WebScreenLayout> {
     return Scaffold(
       appBar: AppBar(
         backgroundColor: mobileBackgroundColor,
-        title: SvgPicture.asset(
-          "assets/instagramLogo.svg",
-          color: primaryColor,
+        title: Image.asset(
+          "assets/branding/logo.1.png",
           height: 32,
           width: 32,
+          fit: BoxFit.contain,
+          errorBuilder: (context, error, stackTrace) {
+            return const SizedBox(
+              height: 32,
+              width: 32,
+              child: Icon(Icons.public, color: primaryColor, size: 22),
+            );
+          },
         ),
         actions: [
           IconButton(

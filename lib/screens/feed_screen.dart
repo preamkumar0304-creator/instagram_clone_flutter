@@ -1,12 +1,12 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:instagram_clone_flutter_firebase/methods/firestore_methods.dart';
 import 'package:instagram_clone_flutter_firebase/models/story_media_item.dart';
 import 'package:instagram_clone_flutter_firebase/providers/user_provider.dart';
 import 'package:instagram_clone_flutter_firebase/screens/add_post_screen.dart';
 import 'package:instagram_clone_flutter_firebase/screens/activity_screen.dart';
+import 'package:instagram_clone_flutter_firebase/screens/messages_screen.dart';
 import 'package:instagram_clone_flutter_firebase/screens/profile_screen.dart';
 import 'package:instagram_clone_flutter_firebase/screens/story_compose_screen.dart';
 import 'package:instagram_clone_flutter_firebase/screens/story_viewer_screen.dart';
@@ -311,11 +311,28 @@ class _FeedScreenState extends State<FeedScreen> {
               ? null
               : AppBar(
                 backgroundColor: mobileBackgroundColor,
-                title: SvgPicture.asset(
-                  "assets/instagramLogo.svg",
-                  color: primaryColor,
-                  height: 32,
-                  width: 32,
+                elevation: 0,
+                centerTitle: false,
+                titleSpacing: 0,
+                leading: IconButton(
+                  icon: const Icon(Icons.photo_camera_outlined, color: primaryColor),
+                  onPressed: () => _openCreateMenu(context),
+                ),
+                title: Transform.translate(
+                  offset: const Offset(-10, 0),
+                  child: Image.asset(
+                    "assets/icon/logo.2.png",
+                    height: 150,
+                    width: 150,
+                    fit: BoxFit.contain,
+                    errorBuilder: (context, error, stackTrace) {
+                      return const SizedBox(
+                        height: 28,
+                        width: 28,
+                        child: Icon(Icons.public, color: primaryColor, size: 22),
+                      );
+                    },
+                  ),
                 ),
                 actions: [
                   IconButton(
@@ -333,10 +350,14 @@ class _FeedScreenState extends State<FeedScreen> {
                   ),
                   IconButton(
                     onPressed: () {
-                      _openCreateMenu(context);
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const MessagesScreen(),
+                        ),
+                      );
                     },
                     icon: const Icon(
-                      Icons.add_box_outlined,
+                      Icons.chat_bubble_outline,
                       color: primaryColor,
                     ),
                   ),
@@ -387,13 +408,19 @@ class _FeedScreenState extends State<FeedScreen> {
             future: _privacyFuture,
             builder: (context, privacySnap) {
               final visiblePosts = privacySnap.data ?? [];
+              final followingOnly =
+                  visiblePosts.where((post) {
+                    final uid = (post["uid"] ?? "").toString();
+                    return allowedUids.contains(uid);
+                  }).toList();
               if (privacySnap.connectionState == ConnectionState.waiting) {
                 return const Center(
                   child: CircularProgressIndicator(color: primaryColor),
                 );
               }
               return ListView.builder(
-                itemCount: visiblePosts.length + 1,
+                key: const PageStorageKey<String>("feed_list"),
+                itemCount: followingOnly.length + 1,
                 itemBuilder: (context, index) {
                   if (index == 0) {
                     return Container(
@@ -403,7 +430,7 @@ class _FeedScreenState extends State<FeedScreen> {
                       child: _StoriesRow(user: user),
                     );
                   }
-                  final post = visiblePosts[index - 1];
+                  final post = followingOnly[index - 1];
                   return Container(
                     margin: EdgeInsets.symmetric(
                       horizontal: width > webScreenSize ? width * 0.3 : 0,
@@ -870,16 +897,17 @@ class _StoryAvatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ringGradient = const LinearGradient(
-      colors: [
-        Color(0xFF2C2C2C),
-        Color(0xFF5A5A5A),
-        Color(0xFF8A8A8A),
-        Color(0xFFBDBDBD),
-      ],
-      begin: Alignment.topLeft,
-      end: Alignment.bottomRight,
-    );
+      final ringGradient = const LinearGradient(
+        colors: [
+          Color(0xFFFCAF45),
+          Color(0xFFF77737),
+          Color(0xFFE1306C),
+          Color(0xFFC13584),
+          Color(0xFF833AB4),
+        ],
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+      );
     final showGradient = hasStory && hasUnseenStory;
     final avatar = Column(
       children: [
@@ -890,20 +918,23 @@ class _StoryAvatar extends StatelessWidget {
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 gradient: showGradient ? ringGradient : null,
-                border:
-                    showGradient
-                        ? null
-                        : Border.all(color: secondaryColor, width: 1),
+                  border:
+                      showGradient
+                          ? null
+                          : Border.all(
+                            color: secondaryColor.withOpacity(0.6),
+                            width: 1,
+                          ),
               ),
               child: CircleAvatar(
                 radius: 28,
                 backgroundImage:
                     photoUrl.isNotEmpty ? NetworkImage(photoUrl) : null,
-                backgroundColor: Colors.grey.shade800,
-                child:
-                    photoUrl.isEmpty
-                        ? const Icon(Icons.person, color: Colors.white)
-                        : null,
+                  backgroundColor: Colors.grey.shade300,
+                  child:
+                      photoUrl.isEmpty
+                          ? const Icon(Icons.person, color: Colors.white)
+                          : null,
               ),
             ),
             if (isLive)
@@ -957,8 +988,8 @@ class _StoryAvatar extends StatelessWidget {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             textAlign: TextAlign.center,
-            style: const TextStyle(color: primaryColor, fontSize: 12),
-          ),
+              style: const TextStyle(color: primaryColor, fontSize: 11),
+            ),
         ),
       ],
     );
@@ -1022,10 +1053,11 @@ class _AppBarStoryAvatar extends StatelessWidget {
                   hasStory && hasUnseen
                       ? const LinearGradient(
                         colors: [
-                          Color(0xFF2C2C2C),
-                          Color(0xFF5A5A5A),
-                          Color(0xFF8A8A8A),
-                          Color(0xFFBDBDBD),
+                          Color(0xFFFCAF45),
+                          Color(0xFFF77737),
+                          Color(0xFFE1306C),
+                          Color(0xFFC13584),
+                          Color(0xFF833AB4),
                         ],
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
@@ -1034,7 +1066,10 @@ class _AppBarStoryAvatar extends StatelessWidget {
               border:
                   hasStory && hasUnseen
                       ? null
-                      : Border.all(color: secondaryColor, width: 1),
+                      : Border.all(
+                        color: secondaryColor.withOpacity(0.6),
+                        width: 1,
+                      ),
             ),
             child: CircleAvatar(
               radius: 14,

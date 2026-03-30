@@ -43,6 +43,8 @@ class MyApp extends StatelessWidget {
               backgroundColor: mobileBackgroundColor,
               foregroundColor: primaryColor,
               iconTheme: IconThemeData(color: primaryColor),
+              elevation: 0,
+              centerTitle: false,
             ),
             iconTheme: const IconThemeData(color: primaryColor),
             textTheme: ThemeData.light().textTheme.apply(

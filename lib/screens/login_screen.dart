@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'package:instagram_clone_flutter_firebase/methods/auth_methods.dart';
 import 'package:instagram_clone_flutter_firebase/responsive/responsive_layout_screen.dart';
 import 'package:instagram_clone_flutter_firebase/responsive/mobile_screen_layout.dart';
@@ -45,7 +44,19 @@ class _LoginScreenState extends State<LoginScreen> {
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Flexible(flex: 1, child: Container()),
-              SvgPicture.asset("assets/instagramIcon.svg", height: 64),
+              Image.asset(
+                "assets/branding/logo.1.png",
+                height: 64,
+                width: 64,
+                fit: BoxFit.contain,
+                errorBuilder: (context, error, stackTrace) {
+                  return const SizedBox(
+                    height: 64,
+                    width: 64,
+                    child: Icon(Icons.public, color: primaryColor, size: 32),
+                  );
+                },
+              ),
               const SizedBox(height: 120),
               Padding(
                 padding: const EdgeInsets.only(bottom: 5),
