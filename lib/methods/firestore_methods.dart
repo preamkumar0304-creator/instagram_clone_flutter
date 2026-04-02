@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -11,6 +12,7 @@ import 'package:instagram_clone_flutter_firebase/models/story_media_item.dart';
 import 'package:instagram_clone_flutter_firebase/utils/colors.dart';
 import 'package:instagram_clone_flutter_firebase/utils/utils.dart';
 import 'package:uuid/uuid.dart';
+import 'package:video_thumbnail/video_thumbnail.dart';
 
 class FirestoreMethods {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -34,8 +36,12 @@ class FirestoreMethods {
     String uid,
     String username,
     String profileUrl,
-    String location,
-  ) async {
+    String location, {
+    String? audioUrl,
+    String? audioName,
+    double? audioStart,
+    double? audioEnd,
+  }) async {
     String message = "";
     try {
       String postUrl = await StorageMethods().uploadImageToStorage(
@@ -65,6 +71,10 @@ class FirestoreMethods {
         "commentCount": 0,
         "reachUsers": [],
         "genderBreakdown": {"male": 0, "female": 0, "other": 0},
+        "audioUrl": audioUrl ?? "",
+        "audioName": audioName ?? "",
+        "audioStart": audioStart ?? 0.0,
+        "audioEnd": audioEnd ?? 0.0,
       });
       _firestore.collection("posts").doc(postId).set(postData);
       message = "Post Successfully Added!";
@@ -183,6 +193,34 @@ class FirestoreMethods {
           clr: errorColor,
         );
       }
+    }
+  }
+
+  Future<String> deleteReel({
+    required String reelId,
+    String? reelUrl,
+    String? thumbnailUrl,
+    String? coverUrl,
+  }) async {
+    try {
+      final urls = <String>{
+        reelUrl ?? "",
+        thumbnailUrl ?? "",
+        coverUrl ?? "",
+      }..removeWhere((url) => url.isEmpty);
+
+      for (final url in urls) {
+        try {
+          await FirebaseStorage.instance.refFromURL(url).delete();
+        } catch (_) {}
+      }
+
+      await _firestore.collection("reels").doc(reelId).delete();
+      return "Reel deleted.";
+    } on FirebaseException catch (err) {
+      return err.message ?? err.code;
+    } catch (err) {
+      return err.toString();
     }
   }
 
@@ -373,6 +411,11 @@ class FirestoreMethods {
     required String uid,
     required String username,
     required String profileUrl,
+    String? audioUrl,
+    String? audioName,
+    double? audioStart,
+    double? audioEnd,
+    int? storyDurationSeconds,
   }) async {
     String message = "";
     try {
@@ -429,6 +472,9 @@ class FirestoreMethods {
           fileName: storyId,
         );
       }
+      if (storyDurationSeconds != null && storyDurationSeconds > 0) {
+        storyDuration = storyDurationSeconds;
+      }
       final createdAt = DateTime.now();
       final data = {
         "storyId": storyId,
@@ -439,6 +485,10 @@ class FirestoreMethods {
         "contentHash": contentHash,
         "storyType": storyType,
         "storyDuration": storyDuration,
+        "audioUrl": audioUrl ?? "",
+        "audioName": audioName ?? "",
+        "audioStart": audioStart ?? 0.0,
+        "audioEnd": audioEnd ?? 0.0,
         "createdAt": createdAt,
         "expiresAt": createdAt.add(const Duration(hours: 24)),
         "viewers": <String>[],
@@ -473,24 +523,61 @@ class FirestoreMethods {
   }
 
   Future<String> uploadReel({
-    required Uint8List videoBytes,
+    Uint8List? videoBytes,
+    File? videoFile,
     required String uid,
     required String username,
     required String profileUrl,
   }) async {
     String message = "";
     try {
-      if (videoBytes.isEmpty) {
+      final hasBytes = videoBytes != null && videoBytes.isNotEmpty;
+      final hasFile =
+          videoFile != null &&
+          await videoFile.exists() &&
+          await videoFile.length() > 0;
+      if (!hasBytes && !hasFile) {
         return "Video file is empty.";
       }
       final reelId = const Uuid().v1();
-      final reelUrl = await StorageMethods().uploadBytesToStorage(
-        "reels",
-        videoBytes,
-        true,
-        contentType: "video/mp4",
-        fileName: reelId,
-      );
+      final reelUrl =
+          hasFile
+              ? await StorageMethods().uploadFileToStorage(
+                "reels",
+                videoFile!,
+                true,
+                contentType: "video/mp4",
+                fileName: reelId,
+              )
+              : await StorageMethods().uploadBytesToStorage(
+                "reels",
+                videoBytes!,
+                true,
+                contentType: "video/mp4",
+                fileName: reelId,
+              );
+      var thumbnailUrl = "";
+      if (hasFile) {
+        try {
+          final thumbBytes = await VideoThumbnail.thumbnailData(
+            video: videoFile!.path,
+            imageFormat: ImageFormat.JPEG,
+            maxWidth: 720,
+            quality: 75,
+            timeMs: 1000,
+          );
+          if (thumbBytes != null && thumbBytes.isNotEmpty) {
+            thumbnailUrl = await StorageMethods().uploadBytesToStorage(
+              "reels_thumbs",
+              thumbBytes,
+              true,
+              contentType: "image/jpeg",
+              fileName: "${reelId}_thumb",
+            );
+          }
+        } catch (_) {}
+      }
+      final coverUrl = thumbnailUrl.isNotEmpty ? thumbnailUrl : "";
       final now = DateTime.now();
       await _firestore.collection("reels").doc(reelId).set({
         "reelId": reelId,
@@ -499,6 +586,8 @@ class FirestoreMethods {
         "photoUrl": profileUrl,
         "reelUrl": reelUrl,
         "title": "Reel",
+        "thumbnailUrl": thumbnailUrl,
+        "coverUrl": coverUrl,
         "createdAt": now,
       });
       message = "Reel added.";

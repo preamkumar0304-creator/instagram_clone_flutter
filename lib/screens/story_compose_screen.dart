@@ -1,12 +1,18 @@
+import 'dart:async';
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:instagram_clone_flutter_firebase/methods/firestore_methods.dart';
+import 'package:instagram_clone_flutter_firebase/methods/storage_methods.dart';
 import 'package:instagram_clone_flutter_firebase/models/story_media_item.dart';
 import 'package:instagram_clone_flutter_firebase/models/users.dart';
 import 'package:instagram_clone_flutter_firebase/screens/story_viewer_screen.dart';
 import 'package:instagram_clone_flutter_firebase/utils/colors.dart';
 import 'package:instagram_clone_flutter_firebase/utils/global_variables.dart';
 import 'package:instagram_clone_flutter_firebase/utils/utils.dart';
+import 'package:just_audio/just_audio.dart';
 
 class StoryComposeScreen extends StatefulWidget {
   final List<StoryMediaItem> items;
@@ -24,6 +30,17 @@ class _StoryComposeScreenState extends State<StoryComposeScreen> {
   int _uploadedCount = 0;
   late final PageController _pageController;
   late List<StoryMediaItem> _items;
+  final AudioPlayer _audioPlayer = AudioPlayer();
+  StreamSubscription<Duration>? _audioPositionSub;
+  String? _audioPath;
+  String? _audioName;
+  double _audioDurationSeconds = 0;
+  double _audioStartSeconds = 0;
+  double _audioEndSeconds = 0;
+  double _audioPositionSeconds = 0;
+  bool _isAudioReady = false;
+  bool _isAudioPlaying = false;
+  static const double _maxAudioClipSeconds = 20;
 
   Future<bool> _confirmDiscard() async {
     if (_isUploading) return false;
@@ -58,6 +75,420 @@ class _StoryComposeScreenState extends State<StoryComposeScreen> {
     return result ?? false;
   }
 
+  Future<bool> _pickAudio() async {
+    if (_isUploading) return false;
+    final result = await FilePicker.platform.pickFiles(type: FileType.audio);
+    if (result == null || result.files.isEmpty) return false;
+    final picked = result.files.first;
+    final path = picked.path ?? "";
+    if (path.isEmpty) {
+      showSnackBar(
+        context: context,
+        content: "Selected audio is missing.",
+        clr: errorColor,
+      );
+      return false;
+    }
+    final file = File(path);
+    if (!file.existsSync()) {
+      showSnackBar(
+        context: context,
+        content: "Audio file not found.",
+        clr: errorColor,
+      );
+      return false;
+    }
+    return _loadAudio(path, picked.name);
+  }
+
+  Future<bool> _loadAudio(String path, String name) async {
+    try {
+      final duration = await _audioPlayer.setFilePath(path);
+      if (!mounted) return false;
+      final totalSeconds =
+          (duration?.inMilliseconds ?? 0) / 1000.0;
+      if (totalSeconds <= 0) {
+        showSnackBar(
+          context: context,
+          content: "Unable to read audio duration.",
+          clr: errorColor,
+        );
+        return false;
+      }
+      final end = totalSeconds < _maxAudioClipSeconds
+          ? totalSeconds
+          : _maxAudioClipSeconds;
+      setState(() {
+        _audioPath = path;
+        _audioName = name;
+        _audioDurationSeconds = totalSeconds;
+        _audioStartSeconds = 0;
+        _audioEndSeconds = end;
+        _audioPositionSeconds = 0;
+        _isAudioReady = true;
+        _isAudioPlaying = false;
+      });
+      return true;
+    } catch (_) {
+      if (!mounted) return false;
+      showSnackBar(
+        context: context,
+        content: "Unable to load audio.",
+        clr: errorColor,
+      );
+      return false;
+    }
+  }
+
+  void _clearAudio() {
+    _audioPlayer.stop();
+    setState(() {
+      _audioPath = null;
+      _audioName = null;
+      _audioDurationSeconds = 0;
+      _audioStartSeconds = 0;
+      _audioEndSeconds = 0;
+      _audioPositionSeconds = 0;
+      _isAudioReady = false;
+      _isAudioPlaying = false;
+    });
+  }
+
+  Future<void> _toggleAudioPlayback() async {
+    if (!_isAudioReady || _audioPath == null) return;
+    final file = File(_audioPath!);
+    if (!file.existsSync()) {
+      showSnackBar(
+        context: context,
+        content: "Audio file not found.",
+        clr: errorColor,
+      );
+      _clearAudio();
+      return;
+    }
+    if (_isAudioPlaying) {
+      await _audioPlayer.pause();
+      if (!mounted) return;
+      setState(() {
+        _isAudioPlaying = _audioPlayer.playing;
+      });
+      return;
+    }
+    if (_audioPositionSeconds < _audioStartSeconds ||
+        _audioPositionSeconds > _audioEndSeconds) {
+      await _audioPlayer.seek(
+        Duration(milliseconds: (_audioStartSeconds * 1000).round()),
+      );
+    }
+    await _audioPlayer.play();
+    if (!mounted) return;
+    setState(() {
+      _isAudioPlaying = _audioPlayer.playing;
+    });
+  }
+
+  void _updateTrim(RangeValues values) {
+    _applyTrim(values.start, values.end, notify: true);
+  }
+
+  void _applyTrim(double start, double end, {required bool notify}) {
+    final total = _audioDurationSeconds;
+    if (total <= 0) return;
+    final window =
+        total <= _maxAudioClipSeconds ? total : _maxAudioClipSeconds;
+    var nextStart = start;
+    var nextEnd = end;
+    if (total <= _maxAudioClipSeconds) {
+      nextStart = 0;
+      nextEnd = total;
+    } else {
+      final startDelta = (start - _audioStartSeconds).abs();
+      final endDelta = (end - _audioEndSeconds).abs();
+      if (startDelta >= endDelta) {
+        nextStart = start;
+        nextEnd = nextStart + window;
+      } else {
+        nextEnd = end;
+        nextStart = nextEnd - window;
+      }
+      if (nextStart < 0) {
+        nextStart = 0;
+        nextEnd = window;
+      } else if (nextEnd > total) {
+        nextEnd = total;
+        nextStart = total - window;
+      }
+    }
+    nextStart = nextStart.clamp(0, total);
+    nextEnd = nextEnd.clamp(0, total);
+    _audioPlayer.pause();
+    _audioPlayer.seek(
+      Duration(milliseconds: (nextStart * 1000).round()),
+    );
+    if (notify) {
+      setState(() {
+        _audioStartSeconds = nextStart;
+        _audioEndSeconds = nextEnd;
+        _audioPositionSeconds = nextStart;
+        _isAudioPlaying = false;
+      });
+    } else {
+      _audioStartSeconds = nextStart;
+      _audioEndSeconds = nextEnd;
+      _audioPositionSeconds = nextStart;
+      _isAudioPlaying = false;
+    }
+  }
+
+  Future<void> _openAudioSheet({bool forcePick = false}) async {
+    if (_isUploading) return;
+    if (forcePick || !_isAudioReady || _audioPath == null) {
+      final picked = await _pickAudio();
+      if (!picked) return;
+    }
+    if (!mounted) return;
+    await _audioPlayer.pause();
+    if (mounted) {
+      setState(() {
+        _isAudioPlaying = false;
+      });
+    }
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: mobileBackgroundColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) {
+        return SafeArea(
+          child: StatefulBuilder(
+            builder: (context, sheetSetState) {
+              final hasAudio = _audioPath != null && _isAudioReady;
+              final total =
+                  _audioDurationSeconds > 0 ? _audioDurationSeconds : 1.0;
+              final start = _audioStartSeconds.clamp(0, total).toDouble();
+              final end = _audioEndSeconds.clamp(0, total).toDouble();
+
+              return Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const SizedBox(height: 6),
+                    if (!hasAudio)
+                      TextButton.icon(
+                        style: TextButton.styleFrom(
+                          backgroundColor: Colors.black.withOpacity(0.6),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 10,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(20),
+                            side: const BorderSide(color: Colors.white24),
+                          ),
+                        ),
+                        onPressed: () async {
+                          final picked = await _pickAudio();
+                          if (!picked) return;
+                          sheetSetState(() {});
+                        },
+                        icon: const Icon(Icons.music_note, size: 18),
+                        label: const Text("Add Music"),
+                      ),
+                    if (hasAudio) ...[
+                      const SizedBox(height: 12),
+                      Container(
+                        width: 48,
+                        height: 48,
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: Colors.black12),
+                        ),
+                        child: const Icon(Icons.audiotrack, color: Colors.black54),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        _audioName ?? "Local audio",
+                        style: const TextStyle(
+                          color: primaryColor,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Container(
+                            width: 28,
+                            height: 28,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: Colors.grey.shade300,
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Text(
+                              "20",
+                              style: TextStyle(
+                                color: Colors.black87,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text(
+                                      _formatSeconds(start),
+                                      style: const TextStyle(
+                                        color: Colors.black54,
+                                        fontSize: 11,
+                                      ),
+                                    ),
+                                    Text(
+                                      _formatSeconds(end),
+                                      style: const TextStyle(
+                                        color: Colors.black54,
+                                        fontSize: 11,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 6),
+                                Stack(
+                                  alignment: Alignment.center,
+                                  children: [
+                                    _WaveformTrimView(
+                                      durationSeconds: total,
+                                      startSeconds: start,
+                                      endSeconds: end,
+                                    ),
+                                    Positioned.fill(
+                                      child: RangeSlider(
+                                        values: RangeValues(start, end),
+                                        max: total,
+                                        min: 0,
+                                        divisions:
+                                            total >= 1 ? total.round() : null,
+                                        labels: RangeLabels(
+                                          _formatSeconds(start),
+                                          _formatSeconds(end),
+                                        ),
+                                        onChanged: (values) {
+                                          _applyTrim(
+                                            values.start,
+                                            values.end,
+                                            notify: false,
+                                          );
+                                          sheetSetState(() {});
+                                        },
+                                        activeColor: Colors.transparent,
+                                        inactiveColor: Colors.transparent,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          StreamBuilder<PlayerState>(
+                            stream: _audioPlayer.playerStateStream,
+                            builder: (context, snapshot) {
+                              final playing =
+                                  snapshot.data?.playing ?? _isAudioPlaying;
+                              return GestureDetector(
+                                onTap: () async {
+                                  await _toggleAudioPlayback();
+                                  sheetSetState(() {});
+                                },
+                                child: CircleAvatar(
+                                  radius: 18,
+                                  backgroundColor: Colors.black87,
+                                  child: Icon(
+                                    playing ? Icons.pause : Icons.play_arrow,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ],
+                      ),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton(
+                          onPressed: () async {
+                            final picked = await _pickAudio();
+                            if (!picked) return;
+                            sheetSetState(() {});
+                          },
+                          child: const Text(
+                            "Change Music",
+                            style: TextStyle(color: blueColor),
+                          ),
+                        ),
+                      ),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: const Text(
+                            "Add",
+                            style: TextStyle(color: blueColor),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+
+  Future<String> _uploadAudioIfNeeded() async {
+    final path = _audioPath;
+    if (path == null || path.isEmpty || !_isAudioReady) return "";
+    final file = File(path);
+    if (!file.existsSync()) {
+      showSnackBar(
+        context: context,
+        content: "Audio file not found.",
+        clr: errorColor,
+      );
+      return "";
+    }
+    try {
+      final fileName =
+          "story_audio_${widget.user.uid}_${DateTime.now().millisecondsSinceEpoch}";
+      final url = await StorageMethods().uploadFileToStorage(
+        "stories",
+        file,
+        true,
+        fileName: fileName,
+        contentType: "audio/mpeg",
+      );
+      return url;
+    } catch (_) {
+      return "";
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -85,11 +516,36 @@ class _StoryComposeScreenState extends State<StoryComposeScreen> {
           return seenKeys.add(key);
         }).toList();
     _pageController = PageController();
+    _audioPositionSub = _audioPlayer.positionStream.listen((position) {
+      if (!_isAudioReady) return;
+      final seconds = position.inMilliseconds / 1000.0;
+      if (mounted) {
+        setState(() {
+          _audioPositionSeconds = seconds;
+        });
+      }
+      if (_isAudioPlaying &&
+          _audioEndSeconds > 0 &&
+          seconds >= _audioEndSeconds - 0.05) {
+        _audioPlayer.pause();
+        _audioPlayer.seek(
+          Duration(milliseconds: (_audioStartSeconds * 1000).round()),
+        );
+        if (mounted) {
+          setState(() {
+            _isAudioPlaying = false;
+            _audioPositionSeconds = _audioStartSeconds;
+          });
+        }
+      }
+    });
   }
 
   @override
   void dispose() {
     _pageController.dispose();
+    _audioPositionSub?.cancel();
+    _audioPlayer.dispose();
     super.dispose();
   }
 
@@ -103,10 +559,20 @@ class _StoryComposeScreenState extends State<StoryComposeScreen> {
       );
       return;
     }
+    await _audioPlayer.pause();
+    if (mounted) {
+      setState(() {
+        _isAudioPlaying = false;
+      });
+    }
     setState(() {
       _isUploading = true;
       _uploadedCount = 0;
     });
+    final audioUrl = await _uploadAudioIfNeeded();
+    final hasAudio = audioUrl.isNotEmpty;
+    final audioClipSeconds =
+        (_audioEndSeconds - _audioStartSeconds).round().clamp(1, 20).toInt();
     final errors = <String>[];
     var successCount = 0;
     for (var i = 0; i < _items.length; i++) {
@@ -124,6 +590,10 @@ class _StoryComposeScreenState extends State<StoryComposeScreen> {
             uid: widget.user.uid,
             username: widget.user.username,
             profileUrl: widget.user.photoUrl,
+            audioUrl: hasAudio ? audioUrl : null,
+            audioName: hasAudio ? _audioName : null,
+            audioStart: hasAudio ? _audioStartSeconds : null,
+            audioEnd: hasAudio ? _audioEndSeconds : null,
           );
         }
       } else {
@@ -133,6 +603,11 @@ class _StoryComposeScreenState extends State<StoryComposeScreen> {
           uid: widget.user.uid,
           username: widget.user.username,
           profileUrl: widget.user.photoUrl,
+          audioUrl: hasAudio ? audioUrl : null,
+          audioName: hasAudio ? _audioName : null,
+          audioStart: hasAudio ? _audioStartSeconds : null,
+          audioEnd: hasAudio ? _audioEndSeconds : null,
+          storyDurationSeconds: hasAudio ? audioClipSeconds : null,
         );
       }
       if (!mounted) return;
@@ -180,6 +655,81 @@ class _StoryComposeScreenState extends State<StoryComposeScreen> {
       context: context,
       content: summary,
       clr: successCount > 0 ? secondaryColor : errorColor,
+    );
+  }
+
+  String _formatSeconds(double seconds) {
+    if (seconds.isNaN || seconds.isInfinite) return "0:00";
+    final total = seconds.round();
+    final mins = total ~/ 60;
+    final secs = total % 60;
+    final padded = secs.toString().padLeft(2, "0");
+    return "$mins:$padded";
+  }
+
+  Widget _buildAudioPanel(int total) {
+    final hasAudio = _audioPath != null && _isAudioReady;
+    final bottomOffset = total > 1 ? 150.0 : 90.0;
+    if (!hasAudio) {
+      return Positioned(
+        left: 12,
+        bottom: bottomOffset,
+        child: TextButton.icon(
+          style: TextButton.styleFrom(
+            backgroundColor: Colors.black.withOpacity(0.6),
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+              side: const BorderSide(color: Colors.white24),
+            ),
+          ),
+          onPressed: _isUploading ? null : () => _openAudioSheet(forcePick: true),
+          icon: const Icon(Icons.music_note, size: 18),
+          label: const Text("Add Music"),
+        ),
+      );
+    }
+    return Positioned(
+      left: 12,
+      right: 12,
+      bottom: bottomOffset,
+      child: GestureDetector(
+        onTap: _isUploading ? null : _openAudioSheet,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: Colors.black.withOpacity(0.65),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: Colors.white24),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.music_note, color: Colors.white, size: 18),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  _audioName ?? "Selected audio",
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Colors.white, fontSize: 12),
+                ),
+              ),
+              TextButton(
+                onPressed: _isUploading ? null : _openAudioSheet,
+                child: const Text(
+                  "Edit",
+                  style: TextStyle(color: Colors.white70),
+                ),
+              ),
+              IconButton(
+                onPressed: _isUploading ? null : _clearAudio,
+                icon: const Icon(Icons.close, color: Colors.white70, size: 18),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -363,6 +913,7 @@ class _StoryComposeScreenState extends State<StoryComposeScreen> {
                   ),
                 ),
               ),
+            _buildAudioPanel(total),
             Positioned(
               left: 12,
               right: 12,
@@ -455,6 +1006,75 @@ class _StoryActionIcon extends StatelessWidget {
       radius: 18,
       backgroundColor: Colors.black.withOpacity(0.4),
       child: Icon(icon, color: Colors.white, size: 18),
+    );
+  }
+}
+
+class _WaveformTrimView extends StatelessWidget {
+  final double durationSeconds;
+  final double startSeconds;
+  final double endSeconds;
+
+  const _WaveformTrimView({
+    required this.durationSeconds,
+    required this.startSeconds,
+    required this.endSeconds,
+  });
+
+  List<double> _barHeights(int count) {
+    final pattern = <double>[6, 10, 8, 14, 9, 12, 7, 13, 9, 11];
+    return List<double>.generate(
+      count,
+      (index) => pattern[index % pattern.length],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        final safeDuration = durationSeconds <= 0 ? 1.0 : durationSeconds;
+        final startX = (startSeconds / safeDuration) * width;
+        final endX = (endSeconds / safeDuration) * width;
+        final highlightWidth = (endX - startX).clamp(0.0, width);
+        final bars = _barHeights(32);
+
+        return SizedBox(
+          height: 36,
+          child: Stack(
+            alignment: Alignment.centerLeft,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: bars
+                    .map(
+                      (height) => Container(
+                        width: 3,
+                        height: height,
+                        decoration: BoxDecoration(
+                          color: Colors.black12,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    )
+                    .toList(),
+              ),
+              Positioned(
+                left: startX,
+                child: Container(
+                  width: highlightWidth,
+                  height: 30,
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.pinkAccent, width: 2),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

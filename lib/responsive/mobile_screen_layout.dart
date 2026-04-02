@@ -11,29 +11,52 @@ class MobileScreenLayout extends StatefulWidget {
 }
 
 class _MobileScreenLayoutState extends State<MobileScreenLayout> {
-  int _page = 0;
-  late PageController pageController;
+  int _currentIndex = 0;
+  late final PageController _pageController;
+  List<Widget>? _pages;
+  String? _pagesUid;
+  static const double _fastSwipeVelocity = 1800;
 
-  void navigationTapped(int page) {
-    pageController.jumpToPage(page);
+  void _onNavTap(int page) {
+    _pageController.animateToPage(
+      page,
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeInOut,
+    );
   }
 
-  void onPageChanged(int page) {
+  void _onPageChanged(int page) {
     setState(() {
-      _page = page;
+      _currentIndex = page;
     });
+  }
+
+  bool _handleFastSwipe(ScrollEndNotification notification) {
+    final details = notification.dragDetails;
+    if (details == null || _pages == null) return false;
+    final velocity = details.primaryVelocity ?? 0;
+    if (velocity.abs() < _fastSwipeVelocity) return false;
+    final maxIndex = _pages!.length - 1;
+    final target = velocity < 0 ? _currentIndex + 1 : _currentIndex - 1;
+    if (target < 0 || target > maxIndex) return false;
+    _pageController.animateToPage(
+      target,
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOut,
+    );
+    return false;
   }
 
   @override
   void initState() {
     super.initState();
-    pageController = PageController();
+    _pageController = PageController();
   }
 
   @override
   void dispose() {
+    _pageController.dispose();
     super.dispose();
-    pageController.dispose();
   }
 
   @override
@@ -42,12 +65,15 @@ class _MobileScreenLayoutState extends State<MobileScreenLayout> {
     if (currentUser == null) {
       return const Center(child: CircularProgressIndicator());
     }
-    final items = homeScreenItems(currentUser.uid);
+    if (_pages == null || _pagesUid != currentUser.uid) {
+      _pages = homeScreenItems(currentUser.uid);
+      _pagesUid = currentUser.uid;
+    }
 
     return WillPopScope(
       onWillPop: () async {
-        if (_page != 0) {
-          navigationTapped(0);
+        if (_currentIndex != 0) {
+          _onNavTap(0);
           return false;
         }
         return true;
@@ -94,16 +120,26 @@ class _MobileScreenLayoutState extends State<MobileScreenLayout> {
                   label: "",
                 ),
               ],
-              currentIndex: _page,
-              onTap: navigationTapped,
+              currentIndex: _currentIndex,
+              onTap: _onNavTap,
             ),
           ),
         ),
-        body: PageView(
-          controller: pageController,
-          onPageChanged: onPageChanged,
-          physics: NeverScrollableScrollPhysics(),
-          children: items,
+        body: NotificationListener<OverscrollIndicatorNotification>(
+          onNotification: (overscroll) {
+            overscroll.disallowIndicator();
+            return false;
+          },
+          child: NotificationListener<ScrollEndNotification>(
+            onNotification: _handleFastSwipe,
+            child: PageView(
+              controller: _pageController,
+              onPageChanged: _onPageChanged,
+              physics: const BouncingScrollPhysics(),
+              allowImplicitScrolling: true,
+              children: _pages!,
+            ),
+          ),
         ),
       ),
     );

@@ -1,9 +1,14 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_feather_icons/flutter_feather_icons.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:instagram_clone_flutter_firebase/methods/firestore_methods.dart';
 import 'package:instagram_clone_flutter_firebase/models/story_media_item.dart';
 import 'package:instagram_clone_flutter_firebase/providers/user_provider.dart';
+import 'package:instagram_clone_flutter_firebase/services/feed_ranker.dart';
 import 'package:instagram_clone_flutter_firebase/screens/add_post_screen.dart';
 import 'package:instagram_clone_flutter_firebase/screens/activity_screen.dart';
 import 'package:instagram_clone_flutter_firebase/screens/messages_screen.dart';
@@ -13,6 +18,7 @@ import 'package:instagram_clone_flutter_firebase/screens/story_viewer_screen.dar
 import 'package:instagram_clone_flutter_firebase/screens/live_broadcast_screen.dart';
 import 'package:instagram_clone_flutter_firebase/screens/live_viewer_screen.dart';
 import 'package:instagram_clone_flutter_firebase/utils/colors.dart';
+import 'package:instagram_clone_flutter_firebase/utils/audio_manager.dart';
 import 'package:instagram_clone_flutter_firebase/utils/global_variables.dart';
 import 'package:instagram_clone_flutter_firebase/utils/utils.dart';
 import 'package:instagram_clone_flutter_firebase/widgets/post_card.dart';
@@ -25,14 +31,55 @@ class FeedScreen extends StatefulWidget {
   State<FeedScreen> createState() => _FeedScreenState();
 }
 
-class _FeedScreenState extends State<FeedScreen> {
+class _FeedScreenState extends State<FeedScreen>
+    with AutomaticKeepAliveClientMixin, WidgetsBindingObserver {
   Future<List<Map<String, dynamic>>>? _privacyFuture;
   int _privacySignature = 0;
+  final FeedRanker _ranker = FeedRanker();
+  Timer? _rankingTicker;
+  int _pageSize = 20;
+  final int _pageStep = 10;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _rankingTicker = Timer.periodic(const Duration(seconds: 45), (_) {
+      if (!mounted) return;
+      setState(() {
+        // Trigger re-ranking so decay pushes older posts down over time.
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _rankingTicker?.cancel();
+    AudioManager.instance.stopAudio();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.detached) {
+      AudioManager.instance.pauseAudio();
+    }
+  }
 
   int _safeInt(dynamic value) {
     if (value is int) return value;
     if (value is num) return value.toInt();
     return 0;
+  }
+
+  DateTime _extractPostedAt(Map<String, dynamic> post) {
+    final raw = post["postedDate"] ?? post["createdAt"];
+    if (raw is Timestamp) return raw.toDate();
+    if (raw is DateTime) return raw;
+    return DateTime.fromMillisecondsSinceEpoch(0);
   }
 
   List<Map<String, dynamic>> _applyBoostPattern(
@@ -165,6 +212,17 @@ class _FeedScreenState extends State<FeedScreen> {
     return Object.hash(_hashPosts(posts), _hashAllowedUids(allowedUids));
   }
 
+  void _maybeLoadMore(ScrollMetrics metrics, int totalCount) {
+    if (totalCount <= _pageSize) return;
+    if (metrics.extentAfter > 600) return;
+    setState(() {
+      _pageSize =
+          (_pageSize + _pageStep > totalCount)
+              ? totalCount
+              : _pageSize + _pageStep;
+    });
+  }
+
   void _openCreateMenu(BuildContext context) {
     showModalBottomSheet(
       context: context,
@@ -178,17 +236,33 @@ class _FeedScreenState extends State<FeedScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               const SizedBox(height: 8),
-              const Text(
+              Text(
                 "Create",
-                style: TextStyle(
-                  color: primaryColor,
-                  fontWeight: FontWeight.bold,
+                style: GoogleFonts.inter(
+                  color: Colors.black,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
               const SizedBox(height: 8),
               ListTile(
-                leading: const Icon(Icons.video_library, color: primaryColor),
-                title: const Text("Reel"),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                leading: const Icon(
+                  FeatherIcons.video,
+                  color: Colors.black,
+                  size: 22,
+                ),
+                title: Text(
+                  "Reel",
+                  style: GoogleFonts.inter(
+                    color: Colors.black,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
                 onTap: () {
                   Navigator.pop(context);
                   Navigator.of(context).push(
@@ -202,8 +276,23 @@ class _FeedScreenState extends State<FeedScreen> {
                 },
               ),
               ListTile(
-                leading: const Icon(Icons.edit, color: primaryColor),
-                title: const Text("Edits"),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                leading: const Icon(
+                  FeatherIcons.edit2,
+                  color: Colors.black,
+                  size: 22,
+                ),
+                title: Text(
+                  "Edits",
+                  style: GoogleFonts.inter(
+                    color: Colors.black,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
                 onTap: () {
                   Navigator.pop(context);
                   showSnackBar(
@@ -214,8 +303,23 @@ class _FeedScreenState extends State<FeedScreen> {
                 },
               ),
               ListTile(
-                leading: const Icon(Icons.grid_on, color: primaryColor),
-                title: const Text("Post"),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                leading: const Icon(
+                  FeatherIcons.grid,
+                  color: Colors.black,
+                  size: 22,
+                ),
+                title: Text(
+                  "Post",
+                  style: GoogleFonts.inter(
+                    color: Colors.black,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
                 onTap: () {
                   Navigator.pop(context);
                   Navigator.of(context).push(
@@ -229,8 +333,23 @@ class _FeedScreenState extends State<FeedScreen> {
                 },
               ),
               ListTile(
-                leading: const Icon(Icons.auto_awesome, color: primaryColor),
-                title: const Text("Story"),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                leading: const Icon(
+                  FeatherIcons.bookOpen,
+                  color: Colors.black,
+                  size: 22,
+                ),
+                title: Text(
+                  "Story",
+                  style: GoogleFonts.inter(
+                    color: Colors.black,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
                 onTap: () {
                   Navigator.pop(context);
                   Navigator.of(context).push(
@@ -244,8 +363,23 @@ class _FeedScreenState extends State<FeedScreen> {
                 },
               ),
               ListTile(
-                leading: const Icon(Icons.star_border, color: primaryColor),
-                title: const Text("Highlights"),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                leading: const Icon(
+                  FeatherIcons.star,
+                  color: Colors.black,
+                  size: 22,
+                ),
+                title: Text(
+                  "Highlights",
+                  style: GoogleFonts.inter(
+                    color: Colors.black,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
                 onTap: () {
                   Navigator.pop(context);
                   showSnackBar(
@@ -256,8 +390,23 @@ class _FeedScreenState extends State<FeedScreen> {
                 },
               ),
               ListTile(
-                leading: const Icon(Icons.wifi_tethering, color: primaryColor),
-                title: const Text("Live"),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                leading: const Icon(
+                  FeatherIcons.radio,
+                  color: Colors.black,
+                  size: 22,
+                ),
+                title: Text(
+                  "Live",
+                  style: GoogleFonts.inter(
+                    color: Colors.black,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
                 onTap: () {
                   Navigator.pop(context);
                   final user =
@@ -271,8 +420,23 @@ class _FeedScreenState extends State<FeedScreen> {
                 },
               ),
               ListTile(
-                leading: const Icon(Icons.auto_awesome, color: primaryColor),
-                title: const Text("AI"),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                leading: const Icon(
+                  FeatherIcons.cpu,
+                  color: Colors.black,
+                  size: 22,
+                ),
+                title: Text(
+                  "AI",
+                  style: GoogleFonts.inter(
+                    color: Colors.black,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
                 onTap: () {
                   Navigator.pop(context);
                   showSnackBar(
@@ -292,6 +456,7 @@ class _FeedScreenState extends State<FeedScreen> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     final user = Provider.of<UserProvider>(context).getUser;
     if (user == null) {
       return Center(
@@ -311,28 +476,35 @@ class _FeedScreenState extends State<FeedScreen> {
               ? null
               : AppBar(
                 backgroundColor: mobileBackgroundColor,
+                surfaceTintColor: mobileBackgroundColor,
+                shadowColor: Colors.transparent,
+                scrolledUnderElevation: 0,
                 elevation: 0,
-                centerTitle: false,
-                titleSpacing: 0,
+                centerTitle: true,
                 leading: IconButton(
-                  icon: const Icon(Icons.photo_camera_outlined, color: primaryColor),
+                  icon: const Icon(
+                    FeatherIcons.camera,
+                    color: Colors.black,
+                    size: 22,
+                  ),
                   onPressed: () => _openCreateMenu(context),
                 ),
-                title: Transform.translate(
-                  offset: const Offset(-10, 0),
-                  child: Image.asset(
-                    "assets/icon/logo.2.png",
-                    height: 150,
-                    width: 150,
-                    fit: BoxFit.contain,
-                    errorBuilder: (context, error, stackTrace) {
-                      return const SizedBox(
-                        height: 28,
-                        width: 28,
-                        child: Icon(Icons.public, color: primaryColor, size: 22),
-                      );
-                    },
-                  ),
+                title: Image.asset(
+                  "assets/icon/logo.2.png",
+                  height: 150,
+                  width: 170,
+                  fit: BoxFit.contain,
+                  errorBuilder: (context, error, stackTrace) {
+                    return const SizedBox(
+                      height: 28,
+                      width: 28,
+                      child: Icon(
+                        FeatherIcons.globe,
+                        color: Colors.black,
+                        size: 22,
+                      ),
+                    );
+                  },
                 ),
                 actions: [
                   IconButton(
@@ -344,8 +516,9 @@ class _FeedScreenState extends State<FeedScreen> {
                       );
                     },
                     icon: const Icon(
-                      Icons.favorite_border,
-                      color: primaryColor,
+                      FeatherIcons.heart,
+                      color: Colors.black,
+                      size: 22,
                     ),
                   ),
                   IconButton(
@@ -357,8 +530,9 @@ class _FeedScreenState extends State<FeedScreen> {
                       );
                     },
                     icon: const Icon(
-                      Icons.chat_bubble_outline,
-                      color: primaryColor,
+                      FeatherIcons.messageCircle,
+                      color: Colors.black,
+                      size: 22,
                     ),
                   ),
                 ],
@@ -378,13 +552,12 @@ class _FeedScreenState extends State<FeedScreen> {
           }
           final postData =
               snapshots.data!.docs.map((d) => d.data()).toList();
-          final posts = _applyBoostPattern(postData);
           final muted =
               (user.mutedUsers as List).whereType<String>().toSet();
           final blocked =
               (user.blockedUsers as List).whereType<String>().toSet();
           final filteredPosts =
-              posts.where((post) {
+              postData.where((post) {
                 final uid = (post["uid"] ?? "").toString();
                 if (uid.isEmpty) return false;
                 if (muted.contains(uid) || blocked.contains(uid)) {
@@ -418,27 +591,66 @@ class _FeedScreenState extends State<FeedScreen> {
                   child: CircularProgressIndicator(color: primaryColor),
                 );
               }
-              return ListView.builder(
-                key: const PageStorageKey<String>("feed_list"),
-                itemCount: followingOnly.length + 1,
-                itemBuilder: (context, index) {
-                  if (index == 0) {
+              final rankedPosts =
+                  _ranker.rankPosts(posts: followingOnly, viewer: user);
+              final rankedWithBoost = _applyBoostPattern(rankedPosts);
+              final totalCount = rankedWithBoost.length;
+              final pageSize =
+                  totalCount < _pageSize ? totalCount : _pageSize;
+              final pagedPosts = rankedWithBoost.take(pageSize).toList();
+              return NotificationListener<ScrollNotification>(
+                onNotification: (notification) {
+                  if (notification is ScrollStartNotification ||
+                      notification is ScrollUpdateNotification) {
+                    AudioManager.instance.stopAudio();
+                  }
+                  if (notification.metrics.axis == Axis.vertical) {
+                    _maybeLoadMore(notification.metrics, totalCount);
+                  }
+                  return false;
+                },
+                child: ListView.builder(
+                  key: const PageStorageKey<String>("feed_list"),
+                  itemCount: pagedPosts.length + 1,
+                  itemBuilder: (context, index) {
+                    if (index == 0) {
+                      return Container(
+                        margin: EdgeInsets.symmetric(
+                          horizontal: width > webScreenSize ? width * 0.3 : 0,
+                        ),
+                        child: _StoriesRow(user: user),
+                      );
+                    }
+                    final post = pagedPosts[index - 1];
+                    final postId =
+                        (post["postId"] ?? post["id"] ?? "").toString();
                     return Container(
                       margin: EdgeInsets.symmetric(
                         horizontal: width > webScreenSize ? width * 0.3 : 0,
+                        vertical: width > webScreenSize ? 15 : 0,
                       ),
-                      child: _StoriesRow(user: user),
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 250),
+                        switchInCurve: Curves.easeOut,
+                        switchOutCurve: Curves.easeIn,
+                        transitionBuilder: (child, animation) {
+                          final slide = Tween<Offset>(
+                            begin: const Offset(0, 0.02),
+                            end: Offset.zero,
+                          ).animate(animation);
+                          return FadeTransition(
+                            opacity: animation,
+                            child: SlideTransition(position: slide, child: child),
+                          );
+                        },
+                        child: PostCard(
+                          key: ValueKey("feed-$postId"),
+                          snap: post,
+                        ),
+                      ),
                     );
-                  }
-                  final post = followingOnly[index - 1];
-                  return Container(
-                    margin: EdgeInsets.symmetric(
-                      horizontal: width > webScreenSize ? width * 0.3 : 0,
-                      vertical: width > webScreenSize ? 15 : 0,
-                    ),
-                    child: PostCard(snap: post),
-                  );
-                },
+                  },
+                ),
               );
             },
           );
@@ -446,6 +658,9 @@ class _FeedScreenState extends State<FeedScreen> {
       ),
     );
   }
+
+  @override
+  bool get wantKeepAlive => true;
 }
 
 class _StoriesRow extends StatefulWidget {
@@ -933,7 +1148,11 @@ class _StoryAvatar extends StatelessWidget {
                   backgroundColor: Colors.grey.shade300,
                   child:
                       photoUrl.isEmpty
-                          ? const Icon(Icons.person, color: Colors.white)
+                          ? const Icon(
+                            FeatherIcons.user,
+                            color: Colors.white,
+                            size: 20,
+                          )
                           : null,
               ),
             ),
@@ -949,13 +1168,13 @@ class _StoryAvatar extends StatelessWidget {
                     borderRadius: BorderRadius.circular(6),
                     border: Border.all(color: Colors.white, width: 1),
                   ),
-                  child: const Text(
+                  child: Text(
                     "LIVE",
                     textAlign: TextAlign.center,
-                    style: TextStyle(
+                    style: GoogleFonts.inter(
                       color: Colors.white,
                       fontSize: 10,
-                      fontWeight: FontWeight.bold,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                 ),
@@ -974,7 +1193,11 @@ class _StoryAvatar extends StatelessWidget {
                       shape: BoxShape.circle,
                       border: Border.all(color: mobileBackgroundColor, width: 2),
                     ),
-                    child: const Icon(Icons.add, size: 12, color: Colors.white),
+                    child: const Icon(
+                      FeatherIcons.plus,
+                      size: 12,
+                      color: Colors.white,
+                    ),
                   ),
                 ),
               ),
@@ -988,7 +1211,11 @@ class _StoryAvatar extends StatelessWidget {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             textAlign: TextAlign.center,
-              style: const TextStyle(color: primaryColor, fontSize: 11),
+              style: GoogleFonts.inter(
+                color: Colors.black,
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+              ),
             ),
         ),
       ],
@@ -1079,7 +1306,7 @@ class _AppBarStoryAvatar extends StatelessWidget {
               child:
                   user.photoUrl.isEmpty
                       ? const Icon(
-                        Icons.person,
+                        FeatherIcons.user,
                         color: Colors.white,
                         size: 16,
                       )

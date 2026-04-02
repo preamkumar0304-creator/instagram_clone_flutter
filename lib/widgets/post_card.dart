@@ -1,5 +1,9 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_feather_icons/flutter_feather_icons.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:instagram_clone_flutter_firebase/methods/firestore_methods.dart';
 import 'package:instagram_clone_flutter_firebase/providers/user_provider.dart';
 import 'package:instagram_clone_flutter_firebase/screens/image_viewer_screen.dart';
@@ -11,7 +15,9 @@ import 'package:instagram_clone_flutter_firebase/widgets/like_animation.dart';
 import 'package:instagram_clone_flutter_firebase/widgets/share_post_sheet.dart';
 import 'package:instagram_clone_flutter_firebase/widgets/text.dart';
 import 'package:intl/intl.dart';
+import 'package:instagram_clone_flutter_firebase/utils/audio_manager.dart';
 import 'package:provider/provider.dart';
+import 'package:visibility_detector/visibility_detector.dart';
 
 class PostCard extends StatefulWidget {
   final snap;
@@ -25,6 +31,10 @@ class _PostCardState extends State<PostCard> {
   bool isLikeAnimating = false;
   int commentL = 0;
   bool _hasRecordedView = false;
+  Timer? _labelTimer;
+  bool _showAudioLabel = true;
+  bool _isVisible = false;
+  late final VoidCallback _audioListener;
 
   String _safeString(dynamic value) {
     if (value == null) return "";
@@ -41,6 +51,83 @@ class _PostCardState extends State<PostCard> {
   void initState() {
     super.initState();
     getComments();
+    _startLabelTicker();
+    _audioListener = () {
+      if (mounted) {
+        setState(() {});
+      }
+    };
+    AudioManager.instance.addListener(_audioListener);
+  }
+
+  @override
+  void didUpdateWidget(covariant PostCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.snap != widget.snap) {
+      _startLabelTicker();
+    }
+  }
+
+  @override
+  void dispose() {
+    _labelTimer?.cancel();
+    AudioManager.instance.removeListener(_audioListener);
+    super.dispose();
+  }
+
+  void _startLabelTicker() {
+    _labelTimer?.cancel();
+    final audioName = _safeString(widget.snap["audioName"]);
+    final location = _safeString(widget.snap["location"]);
+    if (audioName.isEmpty) {
+      _showAudioLabel = false;
+      if (mounted) {
+        setState(() {});
+      }
+      return;
+    }
+    if (location.isEmpty) {
+      _showAudioLabel = true;
+      if (mounted) {
+        setState(() {});
+      }
+      return;
+    }
+    _showAudioLabel = true;
+    if (mounted) {
+      setState(() {});
+    }
+    _labelTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (!mounted) return;
+      setState(() {
+        _showAudioLabel = !_showAudioLabel;
+      });
+    });
+  }
+
+  void _handleVisibility(VisibilityInfo info) {
+    final fraction = info.visibleFraction;
+    final shouldBeVisible = fraction >= 0.7;
+    if (_isVisible == shouldBeVisible) return;
+    _isVisible = shouldBeVisible;
+    final postId = _safeString(widget.snap["postId"]);
+    final audioUrl = _safeString(widget.snap["audioUrl"]);
+    if (!_isVisible) {
+      if (AudioManager.instance.currentPostId == postId) {
+        AudioManager.instance.stopAudio();
+      }
+      return;
+    }
+    if (audioUrl.isEmpty || AudioManager.instance.isMuted) return;
+    final start =
+        (widget.snap["audioStart"] is num)
+            ? (widget.snap["audioStart"] as num).toDouble()
+            : 0.0;
+    final end =
+        (widget.snap["audioEnd"] is num)
+            ? (widget.snap["audioEnd"] as num).toDouble()
+            : 0.0;
+    AudioManager.instance.playAudio(postId, audioUrl, start, end);
   }
 
   @override
@@ -61,6 +148,7 @@ class _PostCardState extends State<PostCard> {
   }
 
   void _openProfile() {
+    AudioManager.instance.stopAudio();
     final uid = _safeString(widget.snap["uid"]);
     if (uid.isEmpty) return;
     final viewer = Provider.of<UserProvider>(context, listen: false).getUser;
@@ -93,6 +181,7 @@ class _PostCardState extends State<PostCard> {
   }
 
   void _openComments() {
+    AudioManager.instance.stopAudio();
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -125,6 +214,7 @@ class _PostCardState extends State<PostCard> {
   }
 
   void _openShareSheet() {
+    AudioManager.instance.stopAudio();
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -154,6 +244,7 @@ class _PostCardState extends State<PostCard> {
 
   void _openImageViewer(String url) {
     if (url.isEmpty) return;
+    AudioManager.instance.stopAudio();
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => ImageViewerScreen(imageUrl: url)),
     );
@@ -199,21 +290,32 @@ class _PostCardState extends State<PostCard> {
                 const Divider(color: secondaryColor, height: 1),
             itemBuilder: (context, index) {
               if (index == 0) {
-                return const Padding(
+                return Padding(
                   padding: EdgeInsets.fromLTRB(16, 12, 16, 8),
                   child: Text(
                     "Why are you reporting this ad?",
-                    style: TextStyle(
-                      color: primaryColor,
+                    style: GoogleFonts.inter(
+                      color: Colors.black,
                       fontWeight: FontWeight.w600,
-                      fontSize: 16,
+                      fontSize: 18,
                     ),
                   ),
                 );
               }
               final reason = reasons[index - 1];
               return ListTile(
-                title: Text(reason, style: const TextStyle(color: primaryColor)),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                title: Text(
+                  reason,
+                  style: GoogleFonts.inter(
+                    color: Colors.black,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w400,
+                  ),
+                ),
                 onTap: () {
                   Navigator.pop(context);
                   showSnackBar(
@@ -238,17 +340,28 @@ class _PostCardState extends State<PostCard> {
     final postId = _safeString(widget.snap["postId"]);
     final ownerUid = _safeString(widget.snap["uid"]);
     final location = _safeString(widget.snap["location"]);
+    final audioName = _safeString(widget.snap["audioName"]);
+    final audioUrl = _safeString(widget.snap["audioUrl"]);
     final isSaved = user?.savedPosts.contains(postId) ?? false;
     final isOwner = user != null && user.uid == ownerUid;
     final isFollowing = user?.following.contains(ownerUid) ?? false;
     final shareCount = _safeInt(widget.snap["shareCount"]);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
+    final hasAudioName = audioName.isNotEmpty;
+    final showAudio = hasAudioName && (location.isEmpty || _showAudioLabel);
+    final labelText = showAudio ? audioName : location;
+    final isMuted = AudioManager.instance.isMuted;
+    final isPlaying = AudioManager.instance.isPlaying &&
+        AudioManager.instance.currentPostId == postId;
+    return VisibilityDetector(
+      key: ValueKey("post-$postId"),
+      onVisibilityChanged: _handleVisibility,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             child: Row(
               children: [
                 GestureDetector(
@@ -265,7 +378,11 @@ class _PostCardState extends State<PostCard> {
                       backgroundColor: Colors.grey.shade300,
                       child:
                           photoUrl.isEmpty
-                              ? const Icon(Icons.person, color: Colors.black)
+                              ? const Icon(
+                                FeatherIcons.user,
+                                color: Colors.black,
+                                size: 20,
+                              )
                               : null,
                     ),
                   ),
@@ -281,21 +398,22 @@ class _PostCardState extends State<PostCard> {
                           username,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: primaryColor,
-                            fontSize: 14,
-                            fontWeight: FontWeight.bold,
+                          style: GoogleFonts.inter(
+                            color: Colors.black,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
-                        if (location.isNotEmpty) ...[
+                        if (labelText.isNotEmpty) ...[
                           const SizedBox(height: 3),
                           Text(
-                            location,
+                            labelText,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: secondaryColor,
-                              fontSize: 11,
+                            style: GoogleFonts.inter(
+                              color: Colors.grey,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w400,
                             ),
                           ),
                         ],
@@ -322,7 +440,7 @@ class _PostCardState extends State<PostCard> {
                       ),
                       child: Text(
                         isFollowing ? "Following" : "Follow",
-                        style: TextStyle(
+                        style: GoogleFonts.inter(
                           color: isFollowing ? Colors.black : Colors.white,
                           fontWeight: FontWeight.w600,
                           fontSize: 12,
@@ -348,16 +466,17 @@ class _PostCardState extends State<PostCard> {
                                 horizontal: 16,
                                 vertical: 14,
                               ),
-                              child: const Row(
+                              child: Row(
                                 children: [
                                   Icon(
-                                    Icons.delete_outline,
+                                    FeatherIcons.trash2,
                                     color: Colors.redAccent,
+                                    size: 22,
                                   ),
                                   SizedBox(width: 10),
                                   Text(
                                     "Delete Post",
-                                    style: TextStyle(
+                                    style: GoogleFonts.inter(
                                       color: Colors.redAccent,
                                       fontWeight: FontWeight.w600,
                                       fontSize: 16,
@@ -380,17 +499,18 @@ class _PostCardState extends State<PostCard> {
                                 horizontal: 16,
                                 vertical: 14,
                               ),
-                              child: const Row(
+                              child: Row(
                                 children: [
                                   Icon(
-                                    Icons.visibility_off_outlined,
-                                    color: primaryColor,
+                                    FeatherIcons.eyeOff,
+                                    color: Colors.black,
+                                    size: 22,
                                   ),
                                   SizedBox(width: 10),
                                   Text(
                                     "Not Interested",
-                                    style: TextStyle(
-                                      color: primaryColor,
+                                    style: GoogleFonts.inter(
+                                      color: Colors.black,
                                       fontWeight: FontWeight.w500,
                                       fontSize: 16,
                                     ),
@@ -407,16 +527,17 @@ class _PostCardState extends State<PostCard> {
                                 horizontal: 16,
                                 vertical: 14,
                               ),
-                              child: const Row(
+                              child: Row(
                                 children: [
                                   Icon(
-                                    Icons.report_gmailerrorred_outlined,
+                                    FeatherIcons.alertTriangle,
                                     color: Colors.redAccent,
+                                    size: 22,
                                   ),
                                   SizedBox(width: 10),
                                   Text(
                                     "Report Ad",
-                                    style: TextStyle(
+                                    style: GoogleFonts.inter(
                                       color: Colors.redAccent,
                                       fontWeight: FontWeight.w500,
                                       fontSize: 16,
@@ -435,7 +556,11 @@ class _PostCardState extends State<PostCard> {
                     },
                   );
                 },
-                  icon: const Icon(Icons.more_vert),
+                  icon: const Icon(
+                    FeatherIcons.moreVertical,
+                    color: Colors.black,
+                    size: 22,
+                  ),
                 ),
               ],
             ),
@@ -464,6 +589,49 @@ class _PostCardState extends State<PostCard> {
                     widget.snap["postUrl"],
                   ),
                 ),
+                if (audioUrl.isNotEmpty)
+                  Positioned(
+                    top: 8,
+                    right: 8,
+                    child: GestureDetector(
+                      onTap: () async {
+                        await AudioManager.instance.toggleMute();
+                        if (!AudioManager.instance.isMuted && _isVisible) {
+                          final start =
+                              widget.snap["audioStart"] is num
+                                  ? (widget.snap["audioStart"] as num)
+                                      .toDouble()
+                                  : 0.0;
+                          final end =
+                              widget.snap["audioEnd"] is num
+                                  ? (widget.snap["audioEnd"] as num).toDouble()
+                                  : 0.0;
+                          await AudioManager.instance.playAudio(
+                            postId,
+                            audioUrl,
+                            start,
+                            end,
+                          );
+                        }
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.all(6),
+                        decoration: BoxDecoration(
+                          color: Colors.black54,
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Icon(
+                          isMuted
+                              ? FeatherIcons.volumeX
+                              : (isPlaying
+                                  ? FeatherIcons.volume2
+                                  : FeatherIcons.volume1),
+                          color: Colors.white,
+                          size: 20,
+                        ),
+                      ),
+                    ),
+                  ),
                 AnimatedOpacity(
                   duration: const Duration(milliseconds: 200),
                   opacity: isLikeAnimating ? 1 : 0,
@@ -476,9 +644,9 @@ class _PostCardState extends State<PostCard> {
                       });
                     },
                     child: const Icon(
-                      Icons.favorite,
-                      color: primaryColor,
-                      size: 150,
+                      FeatherIcons.heart,
+                      color: Colors.black,
+                      size: 24,
                     ),
                   ),
                 ),
@@ -505,14 +673,14 @@ class _PostCardState extends State<PostCard> {
                     child:
                         widget.snap["likes"].contains(user.uid)
                             ? const Icon(
-                              Icons.favorite,
-                              color: errorColor,
-                              size: 24,
+                              FeatherIcons.heart,
+                              color: Colors.black,
+                              size: 22,
                             )
                             : const Icon(
-                              Icons.favorite_border,
-                              color: primaryColor,
-                              size: 24,
+                              FeatherIcons.heart,
+                              color: Colors.black,
+                              size: 22,
                             ),
                   ),
                 ),
@@ -521,9 +689,9 @@ class _PostCardState extends State<PostCard> {
                   count: commentL.toString(),
                   onTap: _openComments,
                   child: const Icon(
-                    Icons.messenger_outline,
-                    color: primaryColor,
-                    size: 24,
+                    FeatherIcons.messageCircle,
+                    color: Colors.black,
+                    size: 22,
                   ),
                 ),
                 const SizedBox(width: 18),
@@ -531,9 +699,9 @@ class _PostCardState extends State<PostCard> {
                   count: shareCount.toString(),
                   onTap: _openShareSheet,
                   child: const Icon(
-                    Icons.send_outlined,
-                    color: primaryColor,
-                    size: 24,
+                    FeatherIcons.send,
+                    color: Colors.black,
+                    size: 22,
                   ),
                 ),
                 const Spacer(),
@@ -553,11 +721,9 @@ class _PostCardState extends State<PostCard> {
                     }
                   },
                   icon: Icon(
-                    isSaved
-                        ? Icons.bookmark_rounded
-                        : Icons.bookmark_border_rounded,
-                    color: primaryColor,
-                    size: 24,
+                    isSaved ? FeatherIcons.bookmark : FeatherIcons.bookmark,
+                    color: isSaved ? Colors.black : Colors.black54,
+                    size: 22,
                   ),
                 ),
               ],
@@ -573,17 +739,18 @@ class _PostCardState extends State<PostCard> {
                     children: [
                       TextSpan(
                         text: widget.snap["username"],
-                        style: TextStyle(
-                          color: primaryColor,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
+                        style: GoogleFonts.inter(
+                          color: Colors.black,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 15,
                         ),
                       ),
                       TextSpan(
                         text: "  ${widget.snap["caption"]}",
-                        style: const TextStyle(
-                          color: primaryColor,
+                        style: GoogleFonts.inter(
+                          color: Colors.black,
                           fontSize: 14,
+                          fontWeight: FontWeight.w400,
                         ),
                       ),
                     ],
@@ -601,14 +768,15 @@ class _PostCardState extends State<PostCard> {
                   widget.snap["postedDate"].toDate(),
                 ),
                 textClr: secondaryColor,
-                textSize: 11,
+                textSize: 12,
               ),
             ),
           ),
           const SizedBox(height: 6),
         ],
       ),
-    );
+    ),
+  );
   }
 }
 
@@ -634,9 +802,9 @@ class _ActionCount extends StatelessWidget {
           const SizedBox(height: 4),
           Text(
             count,
-            style: const TextStyle(
-              color: secondaryColor,
-              fontSize: 11,
+            style: GoogleFonts.inter(
+              color: Colors.grey,
+              fontSize: 12,
               fontWeight: FontWeight.w500,
             ),
           ),

@@ -46,6 +46,7 @@ class SavedScreen extends StatelessWidget {
           "reelUrl": data["reelUrl"] ?? "",
           "coverUrl": data["coverUrl"] ?? "",
           "thumbnailUrl": data["thumbnailUrl"] ?? "",
+          "photoUrl": data["photoUrl"] ?? "",
           "uid": data["uid"] ?? "",
         });
       }
@@ -170,7 +171,12 @@ class SavedScreen extends StatelessWidget {
                             (reel["coverUrl"] as String?)?.trim() ?? "";
                         final thumb =
                             (reel["thumbnailUrl"] as String?)?.trim() ?? "";
-                        final imageUrl = cover.isNotEmpty ? cover : thumb;
+                        final photoUrl =
+                            (reel["photoUrl"] as String?)?.trim() ?? "";
+                        final safeCover =
+                            cover.isNotEmpty && cover != photoUrl ? cover : "";
+                        final imageUrl =
+                            thumb.isNotEmpty ? thumb : safeCover;
                         if (imageUrl.isEmpty) {
                           return Container(
                             color: Colors.black12,

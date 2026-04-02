@@ -30,26 +30,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Widget _trailingWithDot({required bool showDot}) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (showDot) _statusDot(),
-        if (showDot) const SizedBox(width: 8),
-        const Icon(Icons.chevron_right, color: secondaryColor),
-      ],
-    );
+    if (!showDot) return const SizedBox.shrink();
+    return _statusDot();
   }
 
-  Widget _sectionLabel(String text) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(4, 18, 4, 8),
-      child: Text(
-        text,
+  Widget _settingsTile({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    Widget? trailing,
+    VoidCallback? onTap,
+  }) {
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      leading: Icon(icon, color: Colors.black54, size: 22),
+      title: Text(
+        title,
         style: const TextStyle(
           color: primaryColor,
-          fontWeight: FontWeight.bold,
+          fontWeight: FontWeight.w600,
+          fontSize: 16,
         ),
       ),
+      subtitle: Text(
+        subtitle,
+        style: const TextStyle(color: secondaryColor, fontSize: 13),
+      ),
+      trailing: trailing,
+      onTap: onTap,
     );
   }
 
@@ -86,8 +94,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
       backgroundColor: mobileBackgroundColor,
       appBar: AppBar(
         backgroundColor: mobileBackgroundColor,
-        title: const Text("Settings", style: TextStyle(color: primaryColor)),
+        title: const Text(
+          "Settings",
+          style: TextStyle(
+            color: primaryColor,
+            fontWeight: FontWeight.w600,
+            fontSize: 18,
+          ),
+        ),
         iconTheme: const IconThemeData(color: primaryColor),
+        elevation: 0,
+        bottom: const PreferredSize(
+          preferredSize: Size.fromHeight(1),
+          child: Divider(height: 1, color: Color(0xFFE9E9E9)),
+        ),
       ),
       body: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
         stream:
@@ -123,21 +143,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   (notifSnap.data?.docs ?? []).isNotEmpty;
 
               return ListView(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.fromLTRB(0, 8, 0, 16),
                 children: [
-                  _sectionLabel("For professionals"),
-                  ListTile(
-                    leading: const Icon(Icons.bar_chart, color: primaryColor),
-                    title: const Text("Insights"),
-                    subtitle: Text(
-                      isProfessional
-                          ? "View performance insights"
-                          : "Available to professional accounts",
-                    ),
-                    trailing: const Icon(
-                      Icons.chevron_right,
-                      color: secondaryColor,
-                    ),
+                  _settingsTile(
+                    icon: Icons.bar_chart_outlined,
+                    title: "Insights",
+                    subtitle:
+                        isProfessional
+                            ? "View performance insights"
+                            : "Available to professional accounts",
                     onTap:
                         isProfessional
                             ? () {
@@ -149,39 +163,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             }
                             : null,
                   ),
-                  const Divider(height: 1),
-                  _sectionLabel("How you use Instagram"),
-                  ListTile(
-                    leading: const Icon(Icons.bookmark_border, color: primaryColor),
-                    title: const Text("Saved"),
-                    subtitle: const Text("Saved posts and reels"),
-                    trailing: const Icon(Icons.chevron_right, color: secondaryColor),
+                  const SizedBox(height: 6),
+                  _settingsTile(
+                    icon: Icons.bookmark_border,
+                    title: "Saved",
+                    subtitle: "Saved posts and reels",
                     onTap: () {
                       Navigator.of(context).push(
                         MaterialPageRoute(builder: (_) => const SavedScreen()),
                       );
                     },
                   ),
-                  const Divider(height: 1),
-                  ListTile(
-                    leading: const Icon(Icons.favorite_border, color: primaryColor),
-                    title: const Text("Your activity"),
-                    subtitle: const Text("See recent interactions"),
-                    trailing: const Icon(Icons.chevron_right, color: secondaryColor),
+                  _settingsTile(
+                    icon: Icons.favorite_border,
+                    title: "Your activity",
+                    subtitle: "See recent interactions",
                     onTap: () {
                       Navigator.of(context).push(
                         MaterialPageRoute(builder: (_) => const ActivityScreen()),
                       );
                     },
                   ),
-                  const Divider(height: 1),
-                  ListTile(
-                    leading: const Icon(
-                      Icons.notifications_outlined,
-                      color: primaryColor,
-                    ),
-                    title: const Text("Notifications"),
-                    subtitle: const Text("Control your alerts"),
+                  _settingsTile(
+                    icon: Icons.notifications_none,
+                    title: "Notifications",
+                    subtitle: "Control your alerts",
                     trailing: _trailingWithDot(
                       showDot: hasUnreadNotifications,
                     ),
@@ -195,12 +201,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       );
                     },
                   ),
-                  const Divider(height: 1),
-                  ListTile(
-                    leading: const Icon(Icons.timer_outlined, color: primaryColor),
-                    title: const Text("Time management"),
-                    subtitle: const Text("Track time, set limits, sleep mode"),
-                    trailing: const Icon(Icons.chevron_right, color: secondaryColor),
+                  _settingsTile(
+                    icon: Icons.timer_outlined,
+                    title: "Time management",
+                    subtitle: "Track time, set limits, sleep mode",
                     onTap: () {
                       Navigator.of(context).push(
                         MaterialPageRoute(
@@ -209,12 +213,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       );
                     },
                   ),
-                  const Divider(height: 1),
-                  _sectionLabel("Who can see your content"),
-                  ListTile(
-                    leading: const Icon(Icons.lock_outline, color: primaryColor),
-                    title: const Text("Privacy"),
-                    subtitle: const Text("Manage who can see your content"),
+                  const SizedBox(height: 6),
+                  _settingsTile(
+                    icon: Icons.lock_outline,
+                    title: "Privacy",
+                    subtitle: "Manage who can see your content",
                     trailing: _trailingWithDot(
                       showDot: hasFollowRequests,
                     ),
@@ -226,16 +229,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       );
                     },
                   ),
-                  const Divider(height: 1),
-                  _sectionLabel("How others can interact with you"),
-                  ListTile(
-                    leading: const Icon(
-                      Icons.message_outlined,
-                      color: primaryColor,
-                    ),
-                    title: const Text("Messages and story replies"),
-                    subtitle: const Text("Control who can reach you"),
-                    trailing: const Icon(Icons.chevron_right, color: secondaryColor),
+                  _settingsTile(
+                    icon: Icons.chat_bubble_outline,
+                    title: "Messages and story replies",
+                    subtitle: "Control who can reach you",
                     onTap: () {
                       Navigator.of(context).push(
                         MaterialPageRoute(

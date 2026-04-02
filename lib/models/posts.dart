@@ -11,6 +11,10 @@ class Post {
   final String profileUrl;
   final int shareCount;
   final String location;
+  final String audioUrl;
+  final String audioName;
+  final double audioStart;
+  final double audioEnd;
 
   Post({
     required this.postId,
@@ -23,6 +27,10 @@ class Post {
     required this.profileUrl,
     required this.shareCount,
     required this.location,
+    this.audioUrl = "",
+    this.audioName = "",
+    this.audioStart = 0,
+    this.audioEnd = 0,
   });
 
   Map<String, dynamic> toMap() => {
@@ -36,6 +44,10 @@ class Post {
     "photoUrl": profileUrl,
     "shareCount": shareCount,
     "location": location,
+    "audioUrl": audioUrl,
+    "audioName": audioName,
+    "audioStart": audioStart,
+    "audioEnd": audioEnd,
   };
 
   static Post fromSnap(DocumentSnapshot snap) {
@@ -54,6 +66,16 @@ class Post {
               ? snapshot["shareCount"] as int
               : (snapshot["shareCount"] as num?)?.toInt() ?? 0,
       location: (snapshot["location"] ?? "") as String,
+      audioUrl: (snapshot["audioUrl"] ?? "") as String,
+      audioName: (snapshot["audioName"] ?? "") as String,
+      audioStart:
+          snapshot["audioStart"] is num
+              ? (snapshot["audioStart"] as num).toDouble()
+              : 0,
+      audioEnd:
+          snapshot["audioEnd"] is num
+              ? (snapshot["audioEnd"] as num).toDouble()
+              : 0,
     );
   }
 }

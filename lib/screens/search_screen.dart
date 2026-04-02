@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -5,6 +7,8 @@ import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import 'package:instagram_clone_flutter_firebase/screens/profile_screen.dart';
 import 'package:instagram_clone_flutter_firebase/screens/search_media_viewer_screen.dart';
 import 'package:instagram_clone_flutter_firebase/utils/colors.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:video_thumbnail/video_thumbnail.dart';
 
 class SearchScreen extends StatefulWidget {
   const SearchScreen({super.key});
@@ -13,7 +17,8 @@ class SearchScreen extends StatefulWidget {
   State<SearchScreen> createState() => _SearchScreenState();
 }
 
-class _SearchScreenState extends State<SearchScreen> {
+class _SearchScreenState extends State<SearchScreen>
+    with AutomaticKeepAliveClientMixin {
   final TextEditingController searchController = TextEditingController();
   bool isShowUsers = false;
   Future<List<Map<String, dynamic>>>? _mediaFuture;
@@ -165,6 +170,25 @@ class _SearchScreenState extends State<SearchScreen> {
 
     return results.values.toList();
   }
+
+  Widget _mediaFallback({required bool isReel}) {
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Colors.grey.shade200, Colors.grey.shade300],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+      ),
+      child: Center(
+        child: Icon(
+          isReel ? Icons.play_circle_outline : Icons.image_outlined,
+          color: secondaryColor,
+          size: 32,
+        ),
+      ),
+    );
+  }
   @override
   void initState() {
     super.initState();
@@ -179,6 +203,7 @@ class _SearchScreenState extends State<SearchScreen> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     final trendTags = const [
       "Trending",
       "Travel",
@@ -378,19 +403,31 @@ class _SearchScreenState extends State<SearchScreen> {
                           itemBuilder: (context, index) {
                             final item = media[index];
                             final type = _safeString(item["type"]);
+                            final isReel = type == "reel";
                             final data =
                                 item["data"] is Map<String, dynamic>
                                     ? item["data"] as Map<String, dynamic>
                                     : <String, dynamic>{};
                             final postUrl = _safeString(data["postUrl"]);
-                            final coverUrl = _safeString(data["coverUrl"]);
                             final thumbnailUrl = _safeString(data["thumbnailUrl"]);
+                            final reelUrl = _safeString(data["reelUrl"]);
+                            final profilePhoto = _safeString(data["photoUrl"]);
+                            final rawCoverUrl = _safeString(data["coverUrl"]);
+                            final coverUrl =
+                                rawCoverUrl.isNotEmpty &&
+                                        rawCoverUrl != profilePhoto
+                                    ? rawCoverUrl
+                                    : "";
+                            final fallbackUrl =
+                                postUrl.isNotEmpty ? postUrl : profilePhoto;
                             final previewUrl =
-                                coverUrl.isNotEmpty
-                                    ? coverUrl
-                                    : (thumbnailUrl.isNotEmpty
+                                isReel
+                                    ? (thumbnailUrl.isNotEmpty
                                         ? thumbnailUrl
-                                        : postUrl);
+                                        : (coverUrl.isNotEmpty ? coverUrl : ""))
+                                    : (postUrl.isNotEmpty
+                                        ? postUrl
+                                        : fallbackUrl);
 
                             return GestureDetector(
                               onTap: () {
@@ -408,26 +445,33 @@ class _SearchScreenState extends State<SearchScreen> {
                                 borderRadius: BorderRadius.circular(16),
                                 child: Stack(
                                   children: [
-                                    if (previewUrl.isNotEmpty)
-                                      AspectRatio(
-                                        aspectRatio: 1,
-                                        child: Image.network(
-                                          previewUrl,
-                                          fit: BoxFit.cover,
-                                        ),
-                                      )
-                                    else
-                                      Container(
-                                        height: 160,
-                                        color: Colors.grey.shade200,
-                                        child: const Center(
-                                          child: Icon(
-                                            Icons.image_not_supported_outlined,
-                                            color: secondaryColor,
-                                          ),
-                                        ),
-                                      ),
-                                    if (type == "reel")
+                                    AspectRatio(
+                                      aspectRatio: 1,
+                                      child:
+                                          isReel
+                                              ? _ReelSearchThumb(
+                                                thumbnailUrl: previewUrl,
+                                                reelUrl: reelUrl,
+                                                fallback: _mediaFallback(
+                                                  isReel: isReel,
+                                                ),
+                                              )
+                                              : (previewUrl.isNotEmpty
+                                                  ? CachedNetworkImage(
+                                                    imageUrl: previewUrl,
+                                                    fit: BoxFit.cover,
+                                                    placeholder:
+                                                        (_, __) => _mediaFallback(
+                                                          isReel: isReel,
+                                                        ),
+                                                    errorWidget:
+                                                        (_, __, ___) => _mediaFallback(
+                                                          isReel: isReel,
+                                                        ),
+                                                  )
+                                                  : _mediaFallback(isReel: isReel)),
+                                    ),
+                                    if (isReel)
                                       Positioned(
                                         top: 8,
                                         right: 8,
@@ -459,6 +503,91 @@ class _SearchScreenState extends State<SearchScreen> {
                   );
                 },
               ),
+    );
+  }
+
+  @override
+  bool get wantKeepAlive => true;
+}
+
+class _ReelSearchThumb extends StatefulWidget {
+  final String thumbnailUrl;
+  final String reelUrl;
+  final Widget fallback;
+
+  const _ReelSearchThumb({
+    required this.thumbnailUrl,
+    required this.reelUrl,
+    required this.fallback,
+  });
+
+  @override
+  State<_ReelSearchThumb> createState() => _ReelSearchThumbState();
+}
+
+class _ReelSearchThumbState extends State<_ReelSearchThumb> {
+  Future<Uint8List?>? _thumbFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.thumbnailUrl.isEmpty) {
+      _thumbFuture = _generateThumbnail();
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _ReelSearchThumb oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.thumbnailUrl.isNotEmpty) {
+      _thumbFuture = null;
+      return;
+    }
+    if (oldWidget.thumbnailUrl.isNotEmpty && widget.thumbnailUrl.isEmpty) {
+      _thumbFuture = _generateThumbnail();
+    }
+  }
+
+  Future<Uint8List?> _generateThumbnail() async {
+    if (widget.reelUrl.isEmpty) return null;
+    try {
+      final bytes = await VideoThumbnail.thumbnailData(
+        video: widget.reelUrl,
+        imageFormat: ImageFormat.JPEG,
+        maxWidth: 720,
+        quality: 75,
+        timeMs: 1000,
+      );
+      return bytes;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.thumbnailUrl.isNotEmpty) {
+      return CachedNetworkImage(
+        imageUrl: widget.thumbnailUrl,
+        fit: BoxFit.cover,
+        placeholder: (_, __) => widget.fallback,
+        errorWidget: (_, __, ___) => widget.fallback,
+      );
+    }
+
+    return FutureBuilder<Uint8List?>(
+      future: _thumbFuture,
+      builder: (context, snapshot) {
+        final bytes = snapshot.data;
+        if (bytes == null || bytes.isEmpty) {
+          return widget.fallback;
+        }
+        return Image.memory(
+          bytes,
+          fit: BoxFit.cover,
+          gaplessPlayback: true,
+        );
+      },
     );
   }
 }

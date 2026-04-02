@@ -581,10 +581,21 @@ class _ChatScreenState extends State<ChatScreen> {
                                 _ShareCard(
                                   title: "Shared a reel",
                                   subtitle: data["reelOwnerUsername"] ?? "",
-                                  imageUrl:
-                                      data["reelCoverUrl"] ??
-                                      data["reelThumbnailUrl"] ??
-                                      "",
+                                  imageUrl: (() {
+                                    final thumb =
+                                        (data["reelThumbnailUrl"] ?? "")
+                                            .toString();
+                                    if (thumb.isNotEmpty) return thumb;
+                                    final cover =
+                                        (data["reelCoverUrl"] ?? "").toString();
+                                    final ownerPhoto =
+                                        (data["reelOwnerPhotoUrl"] ?? "")
+                                            .toString();
+                                    if (cover.isNotEmpty && cover != ownerPhoto) {
+                                      return cover;
+                                    }
+                                    return "";
+                                  })(),
                                   isMe: isMe,
                                 )
                               else if (shareType == "share_profile")

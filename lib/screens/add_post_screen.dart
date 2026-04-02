@@ -1,9 +1,14 @@
+import 'dart:async';
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:instagram_clone_flutter_firebase/methods/firestore_methods.dart';
+import 'package:instagram_clone_flutter_firebase/methods/storage_methods.dart';
 import 'package:instagram_clone_flutter_firebase/models/story_media_item.dart';
 import 'package:instagram_clone_flutter_firebase/models/users.dart';
 import 'package:instagram_clone_flutter_firebase/providers/user_provider.dart';
@@ -16,10 +21,12 @@ import 'package:instagram_clone_flutter_firebase/screens/live_broadcast_screen.d
 import 'package:instagram_clone_flutter_firebase/utils/colors.dart';
 import 'package:instagram_clone_flutter_firebase/utils/utils.dart';
 import 'package:instagram_clone_flutter_firebase/widgets/text.dart';
-import 'package:instagram_clone_flutter_firebase/widgets/text_button.dart';
+import 'package:just_audio/just_audio.dart';
 import 'package:provider/provider.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:photo_manager_image_provider/photo_manager_image_provider.dart';
+import 'package:video_player/video_player.dart';
+import 'package:instagram_clone_flutter_firebase/services/reel_service.dart';
 
 class AddPostScreen extends StatefulWidget {
   final Uint8List? initialFile;
@@ -41,10 +48,17 @@ class AddPostScreen extends StatefulWidget {
 }
 
 class _AddPostScreenState extends State<AddPostScreen> {
+  static const Color _brandGreen = Color(0xFF009333);
+  static const Color _surfaceFill = Color(0xFFF6F7F8);
+  static const Color _borderLight = Color(0xFFE2E4E8);
+
   final TextEditingController captionController = TextEditingController();
   final TextEditingController locationController = TextEditingController();
   final FocusNode _locationFocus = FocusNode();
   Uint8List? _file;
+  File? _reelFile;
+  VideoPlayerController? _reelController;
+  bool _isReelReady = false;
   bool _isLoading = false;
   bool _createMenuShown = false;
   String _createType = "post";
@@ -62,6 +76,79 @@ class _AddPostScreenState extends State<AddPostScreen> {
   static const int _pageSize = 200;
   bool _hasMoreAssets = true;
   bool _isLoadingMoreAssets = false;
+  final AudioPlayer _postAudioPlayer = AudioPlayer();
+  StreamSubscription<Duration>? _postAudioPositionSub;
+  String? _postAudioPath;
+  String? _postAudioName;
+  double _postAudioDuration = 0;
+  double _postAudioStart = 0;
+  double _postAudioEnd = 0;
+  bool _isPostAudioReady = false;
+  bool _isPostAudioPlaying = false;
+  static const double _maxPostAudioClipSeconds = 20;
+
+  Widget _buildCardButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.white,
+      elevation: 1.2,
+      shadowColor: Colors.black.withOpacity(0.08),
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, color: _brandGreen, size: 20),
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: const TextStyle(
+                  color: primaryColor,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSoftActionButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback onPressed,
+  }) {
+    return ElevatedButton.icon(
+      onPressed: onPressed,
+      icon: Icon(icon, color: primaryColor, size: 18),
+      label: Text(
+        label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(
+          color: primaryColor,
+          fontWeight: FontWeight.w500,
+        ),
+      ),
+      style: ElevatedButton.styleFrom(
+        elevation: 0,
+        backgroundColor: _surfaceFill,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: const BorderSide(color: _borderLight),
+        ),
+      ),
+    );
+  }
 
   void _goHome() {
     Navigator.of(context).pushAndRemoveUntil(
@@ -80,8 +167,10 @@ class _AddPostScreenState extends State<AddPostScreen> {
     if (_isLoading || _isDiscarding) return false;
     final hasChanges =
         _file != null ||
+        _reelFile != null ||
         captionController.text.trim().isNotEmpty ||
-        locationController.text.trim().isNotEmpty;
+        locationController.text.trim().isNotEmpty ||
+        _postAudioPath != null;
     if (!hasChanges) {
       _goHome();
       return false;
@@ -120,6 +209,7 @@ class _AddPostScreenState extends State<AddPostScreen> {
       });
       captionController.clear();
       locationController.clear();
+      _clearPostAudio();
       await Future.delayed(const Duration(milliseconds: 150));
       if (mounted) {
         setState(() {
@@ -160,6 +250,520 @@ class _AddPostScreenState extends State<AddPostScreen> {
     );
     if (!mounted || source == null) return;
     await _pickFromSource(source);
+  }
+
+  Future<bool> _pickPostAudio() async {
+    if (_isLoading) return false;
+    final result = await FilePicker.platform.pickFiles(type: FileType.audio);
+    if (result == null || result.files.isEmpty) return false;
+    final picked = result.files.first;
+    final path = picked.path ?? "";
+    if (path.isEmpty) {
+      showSnackBar(
+        context: context,
+        content: "Selected audio is missing.",
+        clr: errorColor,
+      );
+      return false;
+    }
+    final file = File(path);
+    if (!file.existsSync()) {
+      showSnackBar(
+        context: context,
+        content: "Audio file not found.",
+        clr: errorColor,
+      );
+      return false;
+    }
+    return _loadPostAudio(path, picked.name);
+  }
+
+  Future<bool> _loadPostAudio(String path, String name) async {
+    try {
+      final duration = await _postAudioPlayer.setFilePath(path);
+      if (!mounted) return false;
+      final totalSeconds =
+          (duration?.inMilliseconds ?? 0) / 1000.0;
+      if (totalSeconds <= 0) {
+        showSnackBar(
+          context: context,
+          content: "Unable to read audio duration.",
+          clr: errorColor,
+        );
+        return false;
+      }
+      final end = totalSeconds < _maxPostAudioClipSeconds
+          ? totalSeconds
+          : _maxPostAudioClipSeconds;
+      setState(() {
+        _postAudioPath = path;
+        _postAudioName = name;
+        _postAudioDuration = totalSeconds;
+        _postAudioStart = 0;
+        _postAudioEnd = end;
+        _isPostAudioReady = true;
+        _isPostAudioPlaying = false;
+      });
+      return true;
+    } catch (_) {
+      if (!mounted) return false;
+      showSnackBar(
+        context: context,
+        content: "Unable to load audio.",
+        clr: errorColor,
+      );
+      return false;
+    }
+  }
+
+  void _clearPostAudio() {
+    _postAudioPlayer.stop();
+    _postAudioPath = null;
+    _postAudioName = null;
+    _postAudioDuration = 0;
+    _postAudioStart = 0;
+    _postAudioEnd = 0;
+    _isPostAudioReady = false;
+    _isPostAudioPlaying = false;
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  Future<void> _setReelFile(File file) async {
+    if (!await file.exists()) {
+      showSnackBar(
+        context: context,
+        content: "Video file not found.",
+        clr: errorColor,
+      );
+      return;
+    }
+    _reelController?.pause();
+    _reelController?.dispose();
+    _reelController = VideoPlayerController.file(file);
+    _reelFile = file;
+    _isReelReady = false;
+    try {
+      await _reelController!.initialize();
+      await _reelController!.setLooping(true);
+      await _reelController!.play();
+      if (!mounted) return;
+      setState(() {
+        _isReelReady = true;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      showSnackBar(
+        context: context,
+        content: "Unable to load video preview.",
+        clr: errorColor,
+      );
+      setState(() {
+        _isReelReady = false;
+      });
+    }
+  }
+
+  Future<void> _pickReelFromGallery() async {
+    final granted = await ensureGalleryPermission(forVideo: true);
+    if (!granted) {
+      showSnackBar(
+        context: context,
+        content: "Gallery permission is required to pick videos.",
+        clr: errorColor,
+      );
+      return;
+    }
+    final picker = ImagePicker();
+    final video = await picker.pickVideo(source: ImageSource.gallery);
+    if (video == null) return;
+    await _setReelFile(File(video.path));
+  }
+
+  Future<void> _postReel(UserModel user) async {
+    if (_reelFile == null) {
+      showSnackBar(
+        context: context,
+        content: "Please select a video first.",
+        clr: errorColor,
+      );
+      return;
+    }
+    setState(() {
+      _isLoading = true;
+    });
+    String message = "";
+    try {
+      message = await ReelService().uploadReel(
+        videoFile: _reelFile!,
+        uid: user.uid,
+        username: user.username,
+        profileUrl: user.photoUrl,
+      );
+    } catch (err) {
+      message = err.toString();
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+    if (!mounted) return;
+    if (message.toLowerCase().contains("added")) {
+      showSnackBar(
+        context: context,
+        content: "Reel added.",
+        clr: successColor,
+      );
+      _reelController?.pause();
+      _reelController?.dispose();
+      _reelController = null;
+      _reelFile = null;
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => ProfileScreen(uid: user.uid)),
+      );
+    } else {
+      showSnackBar(
+        context: context,
+        content: message.isEmpty ? "Unable to upload reel." : message,
+        clr: errorColor,
+      );
+    }
+  }
+
+  void _applyPostTrim(double start, double end, {required bool notify}) {
+    final total = _postAudioDuration;
+    if (total <= 0) return;
+    final window =
+        total <= _maxPostAudioClipSeconds ? total : _maxPostAudioClipSeconds;
+    var nextStart = start;
+    var nextEnd = end;
+    if (total <= _maxPostAudioClipSeconds) {
+      nextStart = 0;
+      nextEnd = total;
+    } else {
+      final startDelta = (start - _postAudioStart).abs();
+      final endDelta = (end - _postAudioEnd).abs();
+      if (startDelta >= endDelta) {
+        nextStart = start;
+        nextEnd = nextStart + window;
+      } else {
+        nextEnd = end;
+        nextStart = nextEnd - window;
+      }
+      if (nextStart < 0) {
+        nextStart = 0;
+        nextEnd = window;
+      } else if (nextEnd > total) {
+        nextEnd = total;
+        nextStart = total - window;
+      }
+    }
+    nextStart = nextStart.clamp(0, total);
+    nextEnd = nextEnd.clamp(0, total);
+    _postAudioPlayer.pause();
+    _postAudioPlayer.seek(
+      Duration(milliseconds: (nextStart * 1000).round()),
+    );
+    if (notify) {
+      setState(() {
+        _postAudioStart = nextStart;
+        _postAudioEnd = nextEnd;
+        _isPostAudioPlaying = false;
+      });
+    } else {
+      _postAudioStart = nextStart;
+      _postAudioEnd = nextEnd;
+      _isPostAudioPlaying = false;
+    }
+  }
+
+  Future<void> _togglePostAudioPlayback() async {
+    if (!_isPostAudioReady || _postAudioPath == null) return;
+    final file = File(_postAudioPath!);
+    if (!file.existsSync()) {
+      showSnackBar(
+        context: context,
+        content: "Audio file not found.",
+        clr: errorColor,
+      );
+      _clearPostAudio();
+      return;
+    }
+    if (_isPostAudioPlaying) {
+      await _postAudioPlayer.pause();
+      if (!mounted) return;
+      setState(() {
+        _isPostAudioPlaying = _postAudioPlayer.playing;
+      });
+      return;
+    }
+    await _postAudioPlayer.seek(
+      Duration(milliseconds: (_postAudioStart * 1000).round()),
+    );
+    await _postAudioPlayer.play();
+    if (!mounted) return;
+    setState(() {
+      _isPostAudioPlaying = _postAudioPlayer.playing;
+    });
+  }
+
+  Future<void> _openPostAudioSheet({bool forcePick = false}) async {
+    if (_isLoading) return;
+    if (forcePick || !_isPostAudioReady || _postAudioPath == null) {
+      final picked = await _pickPostAudio();
+      if (!picked) return;
+    }
+    if (!mounted) return;
+    await _postAudioPlayer.pause();
+    if (mounted) {
+      setState(() {
+        _isPostAudioPlaying = false;
+      });
+    }
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: mobileBackgroundColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) {
+        return SafeArea(
+          child: StatefulBuilder(
+            builder: (context, sheetSetState) {
+              final hasAudio = _postAudioPath != null && _isPostAudioReady;
+              final total =
+                  _postAudioDuration > 0 ? _postAudioDuration : 1.0;
+              final start = _postAudioStart.clamp(0, total).toDouble();
+              final end = _postAudioEnd.clamp(0, total).toDouble();
+
+              return Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (!hasAudio)
+                      TextButton.icon(
+                        style: TextButton.styleFrom(
+                          backgroundColor: Colors.black.withOpacity(0.6),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 10,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(20),
+                            side: const BorderSide(color: Colors.white24),
+                          ),
+                        ),
+                        onPressed: () async {
+                          final picked = await _pickPostAudio();
+                          if (!picked) return;
+                          sheetSetState(() {});
+                        },
+                        icon: const Icon(Icons.music_note, size: 18),
+                        label: const Text("Add Music"),
+                      ),
+                    if (hasAudio) ...[
+                      const SizedBox(height: 8),
+                      Container(
+                        width: 48,
+                        height: 48,
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: Colors.black12),
+                        ),
+                        child: const Icon(Icons.audiotrack, color: Colors.black54),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        _postAudioName ?? "Local audio",
+                        style: const TextStyle(
+                          color: primaryColor,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Container(
+                            width: 28,
+                            height: 28,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: Colors.grey.shade300,
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Text(
+                              "20",
+                              style: TextStyle(
+                                color: Colors.black87,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text(
+                                      _formatSeconds(start),
+                                      style: const TextStyle(
+                                        color: Colors.black54,
+                                        fontSize: 11,
+                                      ),
+                                    ),
+                                    Text(
+                                      _formatSeconds(end),
+                                      style: const TextStyle(
+                                        color: Colors.black54,
+                                        fontSize: 11,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 6),
+                                Stack(
+                                  alignment: Alignment.center,
+                                  children: [
+                                    _WaveformTrimView(
+                                      durationSeconds: total,
+                                      startSeconds: start,
+                                      endSeconds: end,
+                                    ),
+                                    Positioned.fill(
+                                      child: RangeSlider(
+                                        values: RangeValues(start, end),
+                                        max: total,
+                                        min: 0,
+                                        divisions:
+                                            total >= 1 ? total.round() : null,
+                                        labels: RangeLabels(
+                                          _formatSeconds(start),
+                                          _formatSeconds(end),
+                                        ),
+                                        onChanged: (values) {
+                                          _applyPostTrim(
+                                            values.start,
+                                            values.end,
+                                            notify: false,
+                                          );
+                                          sheetSetState(() {});
+                                        },
+                                        activeColor: Colors.transparent,
+                                        inactiveColor: Colors.transparent,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          StreamBuilder<PlayerState>(
+                            stream: _postAudioPlayer.playerStateStream,
+                            builder: (context, snapshot) {
+                              final playing =
+                                  snapshot.data?.playing ?? _isPostAudioPlaying;
+                              return GestureDetector(
+                                onTap: () async {
+                                  await _togglePostAudioPlayback();
+                                  sheetSetState(() {});
+                                },
+                                child: CircleAvatar(
+                                  radius: 18,
+                                  backgroundColor: Colors.black87,
+                                  child: Icon(
+                                    playing ? Icons.pause : Icons.play_arrow,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ],
+                      ),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton(
+                          onPressed: () async {
+                            final picked = await _pickPostAudio();
+                            if (!picked) return;
+                            sheetSetState(() {});
+                          },
+                          child: const Text(
+                            "Change Music",
+                            style: TextStyle(color: blueColor),
+                          ),
+                        ),
+                      ),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: const Text(
+                            "Add",
+                            style: TextStyle(color: blueColor),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+
+  Future<String> _uploadPostAudioIfNeeded(String uid) async {
+    final path = _postAudioPath;
+    if (path == null || path.isEmpty || !_isPostAudioReady) return "";
+    final file = File(path);
+    if (!file.existsSync()) {
+      showSnackBar(
+        context: context,
+        content: "Audio file not found.",
+        clr: errorColor,
+      );
+      return "";
+    }
+    try {
+      final fileName =
+          "post_audio_${uid}_${DateTime.now().millisecondsSinceEpoch}";
+      return await StorageMethods().uploadFileToStorage(
+        "posts",
+        file,
+        true,
+        fileName: fileName,
+        contentType: "audio/mpeg",
+      );
+    } catch (_) {
+      return "";
+    }
+  }
+
+  String _formatSeconds(double seconds) {
+    if (seconds.isNaN || seconds.isInfinite) return "0:00";
+    final total = seconds.round();
+    final mins = total ~/ 60;
+    final secs = total % 60;
+    final padded = secs.toString().padLeft(2, "0");
+    return "$mins:$padded";
   }
 
   Future<StoryMediaType?> _selectStoryMediaType() async {
@@ -441,46 +1045,7 @@ class _AddPostScreenState extends State<AddPostScreen> {
       final picker = ImagePicker();
       final video = await picker.pickVideo(source: ImageSource.camera);
       if (video == null) return;
-      final user = Provider.of<UserProvider>(context, listen: false).getUser;
-      if (user == null) return;
-      setState(() {
-        _isLoading = true;
-      });
-      String message = "";
-      try {
-        final bytes = await video.readAsBytes();
-        message = await FirestoreMethods().uploadReel(
-          videoBytes: bytes,
-          uid: user.uid,
-          username: user.username,
-          profileUrl: user.photoUrl,
-        );
-      } catch (err) {
-        message = err.toString();
-      } finally {
-        if (mounted) {
-          setState(() {
-            _isLoading = false;
-          });
-        }
-      }
-      if (!mounted) return;
-      if (message.toLowerCase().contains("added")) {
-        showSnackBar(
-          context: context,
-          content: "Reel added.",
-          clr: successColor,
-        );
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => ProfileScreen(uid: user.uid)),
-        );
-      } else {
-        showSnackBar(
-          context: context,
-          content: message.isEmpty ? "Unable to upload reel." : message,
-          clr: errorColor,
-        );
-      }
+      await _setReelFile(File(video.path));
       return;
     }
 
@@ -526,46 +1091,7 @@ class _AddPostScreenState extends State<AddPostScreen> {
     if (_createType == "reel") {
       final video = await picker.pickVideo(source: ImageSource.gallery);
       if (video == null) return;
-      final user = Provider.of<UserProvider>(context, listen: false).getUser;
-      if (user == null) return;
-      setState(() {
-        _isLoading = true;
-      });
-      String message = "";
-      try {
-        final bytes = await video.readAsBytes();
-        message = await FirestoreMethods().uploadReel(
-          videoBytes: bytes,
-          uid: user.uid,
-          username: user.username,
-          profileUrl: user.photoUrl,
-        );
-      } catch (err) {
-        message = err.toString();
-      } finally {
-        if (mounted) {
-          setState(() {
-            _isLoading = false;
-          });
-        }
-      }
-      if (!mounted) return;
-      if (message.toLowerCase().contains("added")) {
-        showSnackBar(
-          context: context,
-          content: "Reel added.",
-          clr: successColor,
-        );
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => ProfileScreen(uid: user.uid)),
-        );
-      } else {
-        showSnackBar(
-          context: context,
-          content: message.isEmpty ? "Unable to upload reel." : message,
-          clr: errorColor,
-        );
-      }
+      await _setReelFile(File(video.path));
       return;
     }
 
@@ -699,47 +1225,16 @@ class _AddPostScreenState extends State<AddPostScreen> {
         return;
       }
       final file = await _selectedAsset!.file;
-      if (file == null) return;
-      final user = Provider.of<UserProvider>(context, listen: false).getUser;
-      if (user == null) return;
-      setState(() {
-        _isLoading = true;
-      });
-      String message = "";
-      try {
-        final bytes = await file.readAsBytes();
-        message = await FirestoreMethods().uploadReel(
-          videoBytes: bytes,
-          uid: user.uid,
-          username: user.username,
-          profileUrl: user.photoUrl,
-        );
-      } catch (err) {
-        message = err.toString();
-      } finally {
-        if (mounted) {
-          setState(() {
-            _isLoading = false;
-          });
-        }
-      }
-      if (!mounted) return;
-      if (message.toLowerCase().contains("added")) {
+      if (file == null) {
         showSnackBar(
           context: context,
-          content: "Reel added.",
-          clr: successColor,
-        );
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => ProfileScreen(uid: user.uid)),
-        );
-      } else {
-        showSnackBar(
-          context: context,
-          content: message.isEmpty ? "Unable to upload reel." : message,
+          content: "Unable to load video. Try picking from gallery.",
           clr: errorColor,
         );
+        await _openSystemGalleryFallback();
+        return;
       }
+      await _setReelFile(file);
     }
   }
 
@@ -770,9 +1265,9 @@ class _AddPostScreenState extends State<AddPostScreen> {
       });
       String message = "";
       try {
-        final bytes = await video.readAsBytes();
+        final file = File(video.path);
         message = await FirestoreMethods().uploadReel(
-          videoBytes: bytes,
+          videoFile: file,
           uid: user.uid,
           username: user.username,
           profileUrl: user.photoUrl,
@@ -879,6 +1374,7 @@ class _AddPostScreenState extends State<AddPostScreen> {
       _isLoading = true;
     });
     try {
+      final audioUrl = await _uploadPostAudioIfNeeded(uid);
       String message = await FirestoreMethods().uploadPost(
         captionController.text.trim(),
         _file!,
@@ -886,6 +1382,10 @@ class _AddPostScreenState extends State<AddPostScreen> {
         username,
         profileUrl,
         locationController.text.trim(),
+        audioUrl: audioUrl.isNotEmpty ? audioUrl : null,
+        audioName: audioUrl.isNotEmpty ? _postAudioName : null,
+        audioStart: audioUrl.isNotEmpty ? _postAudioStart : null,
+        audioEnd: audioUrl.isNotEmpty ? _postAudioEnd : null,
       );
       if (!mounted) return;
       if (message == "Post Successfully Added!") {
@@ -900,6 +1400,7 @@ class _AddPostScreenState extends State<AddPostScreen> {
           );
         }
         clearImage();
+        _clearPostAudio();
         if (!mounted) return;
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(
@@ -952,12 +1453,27 @@ class _AddPostScreenState extends State<AddPostScreen> {
         });
       } else {
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (_createMenuShown) return;
-          _createMenuShown = true;
-          _initGallery();
-        });
-      }
+      if (_createMenuShown) return;
+      _createMenuShown = true;
+      _initGallery();
+    });
     }
+    _postAudioPositionSub = _postAudioPlayer.positionStream.listen((position) {
+      if (!_isPostAudioReady) return;
+      final seconds = position.inMilliseconds / 1000.0;
+      if (_postAudioEnd > 0 && seconds >= _postAudioEnd - 0.05) {
+        _postAudioPlayer.pause();
+        _postAudioPlayer.seek(
+          Duration(milliseconds: (_postAudioStart * 1000).round()),
+        );
+        if (mounted) {
+          setState(() {
+            _isPostAudioPlaying = false;
+          });
+        }
+      }
+    });
+  }
   }
 
   @override
@@ -967,6 +1483,9 @@ class _AddPostScreenState extends State<AddPostScreen> {
     locationController.dispose();
     _locationFocus.dispose();
     _gridController.dispose();
+    _postAudioPositionSub?.cancel();
+    _postAudioPlayer.dispose();
+    _reelController?.dispose();
   }
 
   Future<void> _setCurrentLocation() async {
@@ -1088,14 +1607,40 @@ class _AddPostScreenState extends State<AddPostScreen> {
     FocusScope.of(context).requestFocus(_locationFocus);
   }
 
+  Future<void> _switchCreateType(String type) async {
+    if (_createType == type) return;
+    setState(() {
+      _createType = type;
+    });
+    if (_albumOptions.isEmpty) return;
+    if (type == "reel") {
+      final videoOption =
+          _albumOptions.firstWhere(
+            (o) => o.label == "Videos",
+            orElse: () => _albumOptions.first,
+          );
+      if (videoOption != _currentAlbum) {
+        await _setAlbum(videoOption);
+      }
+      return;
+    }
+    if (type == "post") {
+      final photoOption = _albumOptions.firstWhere(
+        (o) => o.label == "Photos",
+        orElse: () => _albumOptions.first,
+      );
+      if (photoOption != _currentAlbum) {
+        await _setAlbum(photoOption);
+      }
+    }
+  }
+
   Widget _buildCreateTypeSelector(Color activeColor) {
     Widget buildItem(String label, String type) {
       final isActive = _createType == type;
       return GestureDetector(
         onTap: () {
-          setState(() {
-            _createType = type;
-          });
+          _switchCreateType(type);
         },
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -1186,6 +1731,7 @@ class _AddPostScreenState extends State<AddPostScreen> {
 
     final isStory = _createType == "story";
     final isReel = _createType == "reel";
+    final selectionColor = (isStory || isReel) ? Colors.white : blueColor;
 
     return Column(
       children: [
@@ -1282,7 +1828,10 @@ class _AddPostScreenState extends State<AddPostScreen> {
                 itemBuilder: (context, index) {
                   if (index == 0) {
                     return InkWell(
-                      onTap: _openCameraFromPicker,
+                      onTap:
+                          isReel
+                              ? _openSystemGalleryFallback
+                              : _openCameraFromPicker,
                       child: Container(
                         color: Colors.white,
                         child: const Center(
@@ -1343,7 +1892,10 @@ class _AddPostScreenState extends State<AddPostScreen> {
                           Positioned.fill(
                             child: Container(
                               decoration: BoxDecoration(
-                                border: Border.all(color: blueColor, width: 2),
+                                border: Border.all(
+                                  color: selectionColor,
+                                  width: 2,
+                                ),
                               ),
                             ),
                           ),
@@ -1381,7 +1933,10 @@ class _AddPostScreenState extends State<AddPostScreen> {
   @override
   Widget build(BuildContext context) {
     UserModel? user = Provider.of<UserProvider>(context, listen: false).getUser;
-    final isPickerMode = _file == null;
+    final isPickerMode = _file == null && _reelFile == null;
+    final isReel = _createType == "reel";
+    final hasMedia = isReel ? _reelFile != null : _file != null;
+    final canPost = hasMedia && !_isLoading;
     return WillPopScope(
       onWillPop: _confirmDiscard,
       child: GestureDetector(
@@ -1389,12 +1944,13 @@ class _AddPostScreenState extends State<AddPostScreen> {
           FocusScope.of(context).unfocus();
         },
         child: Scaffold(
-        backgroundColor:
-            isPickerMode ? Colors.black : mobileBackgroundColor,
+        resizeToAvoidBottomInset: true,
+        backgroundColor: isPickerMode ? Colors.black : mobileBackgroundColor,
         appBar: AppBar(
-          backgroundColor:
-              isPickerMode ? Colors.black : mobileBackgroundColor,
+          backgroundColor: isPickerMode ? Colors.black : mobileBackgroundColor,
           automaticallyImplyLeading: false,
+          elevation: 0,
+          centerTitle: true,
           leading: IconButton(
             icon: Icon(
               Icons.close,
@@ -1410,14 +1966,14 @@ class _AddPostScreenState extends State<AddPostScreen> {
           ),
           title: Text(
             _createType == "story"
-                ? "Add to story"
+                ? "Add to Story"
                 : _createType == "reel"
-                    ? "New reel"
-                    : "New post",
+                    ? "New Reel"
+                    : "New Post",
             style: TextStyle(
               color: isPickerMode ? Colors.white : primaryColor,
-              fontWeight: FontWeight.w600,
-              fontSize: 20,
+              fontWeight: FontWeight.w700,
+              fontSize: 18,
             ),
           ),
           actions: [
@@ -1432,25 +1988,76 @@ class _AddPostScreenState extends State<AddPostScreen> {
                   style: TextStyle(
                     color:
                         _selectedAsset == null
-                            ? Colors.white38
-                            : blueColor,
+                            ? (isPickerMode ? Colors.white38 : Colors.black38)
+                            : (isPickerMode ? Colors.white : _brandGreen),
                     fontWeight: FontWeight.w600,
                   ),
                 ),
               )
             else
-              MyTextButton(
-                buttonText: "Post",
-                txtClr: blueColor,
-                onPressed: () {
-                  postImage(user!.uid, user.username, user.photoUrl);
-                },
+              Padding(
+                padding: const EdgeInsets.only(right: 12),
+                child: ElevatedButton(
+                  onPressed:
+                      canPost
+                          ? () {
+                            if (user == null) return;
+                            if (_createType == "reel") {
+                              _postReel(user);
+                            } else {
+                              postImage(user.uid, user.username, user.photoUrl);
+                            }
+                          }
+                          : null,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _brandGreen,
+                    disabledBackgroundColor: _brandGreen.withOpacity(0.45),
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 18,
+                      vertical: 10,
+                    ),
+                    shape: const StadiumBorder(),
+                  ),
+                  child:
+                      _isLoading
+                          ? Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: const [
+                              SizedBox(
+                                width: 14,
+                                height: 14,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              ),
+                              SizedBox(width: 8),
+                              Text(
+                                "Posting",
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          )
+                          : const Text(
+                            "Post",
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                ),
               ),
           ],
         ),
         body:
             isPickerMode
-                ? _buildPicker()
+                ? SafeArea(
+                  child: _buildPicker(),
+                )
                 : SafeArea(
                   child: LayoutBuilder(
                     builder: (context, constraints) {
@@ -1464,7 +2071,7 @@ class _AddPostScreenState extends State<AddPostScreen> {
                           ),
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
-                            crossAxisAlignment: CrossAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
                               if (_isLoading)
                                 SizedBox(
@@ -1472,38 +2079,176 @@ class _AddPostScreenState extends State<AddPostScreen> {
                                       MediaQuery.of(context).size.width * 0.92,
                                   child: LinearProgressIndicator(
                                     borderRadius: BorderRadius.circular(10),
-                                    color: blueColor,
+                                    color: _brandGreen,
                                   ),
                                 ),
                               Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 16,
-                                  vertical: 16,
-                                ),
-                                child: InkWell(
-                                  onTap: _changePostImage,
-                                  child: AspectRatio(
-                                    aspectRatio: 1,
-                                    child: Container(
-                                      decoration: BoxDecoration(
-                                        borderRadius: BorderRadius.circular(12),
-                                        border:
-                                            Border.all(color: secondaryColor),
-                                      ),
-                                      child: ClipRRect(
-                                        borderRadius: BorderRadius.circular(12),
-                                        child: InteractiveViewer(
-                                          panEnabled: true,
-                                          scaleEnabled: true,
-                                          minScale: 1.0,
-                                          maxScale: 4.0,
-                                          boundaryMargin:
-                                              const EdgeInsets.all(80),
-                                          child: Image.memory(
-                                            _file!,
-                                            fit: BoxFit.cover,
-                                            width: double.infinity,
-                                            height: double.infinity,
+                                padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+                                child: AnimatedScale(
+                                  duration: const Duration(milliseconds: 200),
+                                  curve: Curves.easeOut,
+                                  scale: hasMedia ? 1.0 : 0.98,
+                                  child: AnimatedOpacity(
+                                    duration: const Duration(milliseconds: 200),
+                                    opacity: hasMedia ? 1.0 : 0.9,
+                                    child: InkWell(
+                                      onTap:
+                                          _createType == "reel"
+                                              ? _pickReelFromGallery
+                                              : _changePostImage,
+                                      child: AspectRatio(
+                                        aspectRatio:
+                                            (_createType == "reel" ||
+                                                    _createType == "story")
+                                                ? 9 / 16
+                                                : 1,
+                                        child: Container(
+                                          decoration: BoxDecoration(
+                                            color:
+                                                (_createType == "reel" ||
+                                                        _createType == "story")
+                                                    ? Colors.black
+                                                    : Colors.white,
+                                            borderRadius: BorderRadius.circular(20),
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: Colors.black.withOpacity(0.08),
+                                                blurRadius: 16,
+                                                offset: const Offset(0, 8),
+                                              ),
+                                            ],
+                                          ),
+                                          child: ClipRRect(
+                                            borderRadius: BorderRadius.circular(20),
+                                            child: Stack(
+                                              children: [
+                                                Positioned.fill(
+                                                  child:
+                                                      _createType == "reel"
+                                                          ? (_reelFile == null
+                                                              ? Container(
+                                                                color: Colors.black12,
+                                                                child: const Center(
+                                                                  child: Icon(
+                                                                    Icons.play_circle_fill,
+                                                                    color: Colors.white54,
+                                                                    size: 56,
+                                                                  ),
+                                                                ),
+                                                              )
+                                                              : (_isReelReady &&
+                                                                      _reelController !=
+                                                                          null)
+                                                                  ? FittedBox(
+                                                                    fit: BoxFit.cover,
+                                                                    child: SizedBox(
+                                                                      width:
+                                                                          _reelController!
+                                                                              .value
+                                                                              .size
+                                                                              .width,
+                                                                      height:
+                                                                          _reelController!
+                                                                              .value
+                                                                              .size
+                                                                              .height,
+                                                                      child: VideoPlayer(
+                                                                        _reelController!,
+                                                                      ),
+                                                                    ),
+                                                                  )
+                                                                  : const Center(
+                                                                    child:
+                                                                        CircularProgressIndicator(
+                                                                      color: Colors.white,
+                                                                    ),
+                                                                  ))
+                                                          : (_file == null
+                                                              ? Container(
+                                                                color: _surfaceFill,
+                                                                child: const Center(
+                                                                  child: Icon(
+                                                                    Icons.image_outlined,
+                                                                    color: secondaryColor,
+                                                                    size: 48,
+                                                                  ),
+                                                                ),
+                                                              )
+                                                              : InteractiveViewer(
+                                                                panEnabled: true,
+                                                                scaleEnabled: true,
+                                                                minScale: 1.0,
+                                                                maxScale: 4.0,
+                                                                boundaryMargin:
+                                                                    const EdgeInsets.all(80),
+                                                                child: Image.memory(
+                                                                  _file!,
+                                                                  fit: BoxFit.cover,
+                                                                  width: double.infinity,
+                                                                  height: double.infinity,
+                                                                ),
+                                                              )),
+                                                ),
+                                                Positioned(
+                                                  top: 12,
+                                                  right: 12,
+                                                  child: Material(
+                                                    color: Colors.white.withOpacity(0.9),
+                                                    shape: const CircleBorder(),
+                                                    child: InkWell(
+                                                      customBorder:
+                                                          const CircleBorder(),
+                                                      onTap:
+                                                          _createType == "reel"
+                                                              ? _pickReelFromGallery
+                                                              : _changePostImage,
+                                                      child: const Padding(
+                                                        padding: EdgeInsets.all(8),
+                                                        child: Icon(
+                                                          Icons.edit_outlined,
+                                                          color: primaryColor,
+                                                          size: 18,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
+                                                if (_createType == "reel" &&
+                                                    _reelFile != null)
+                                                  Center(
+                                                    child: GestureDetector(
+                                                      onTap: () {
+                                                        final controller =
+                                                            _reelController;
+                                                        if (controller == null) return;
+                                                        if (controller.value.isPlaying) {
+                                                          controller.pause();
+                                                        } else {
+                                                          controller.play();
+                                                        }
+                                                        setState(() {});
+                                                      },
+                                                      child: Container(
+                                                        width: 56,
+                                                        height: 56,
+                                                        decoration: BoxDecoration(
+                                                          color: Colors.black.withOpacity(0.35),
+                                                          shape: BoxShape.circle,
+                                                        ),
+                                                        child: Icon(
+                                                          _reelController?.value
+                                                                      .isPlaying ==
+                                                                  true
+                                                              ? Icons.pause
+                                                              : Icons.play_arrow,
+                                                          color: Colors.white,
+                                                          size: 32,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ),
+                                              ],
+                                            ),
                                           ),
                                         ),
                                       ),
@@ -1515,26 +2260,138 @@ class _AddPostScreenState extends State<AddPostScreen> {
                                 padding: const EdgeInsets.symmetric(horizontal: 16),
                                 child: TextField(
                                   controller: captionController,
-                                  maxLines: 4,
+                                  minLines: 2,
+                                  maxLines: 6,
+                                  keyboardType: TextInputType.multiline,
+                                  textAlign: TextAlign.start,
                                   textAlignVertical: TextAlignVertical.top,
+                                  style: const TextStyle(color: primaryColor),
                                   decoration: InputDecoration(
-                                    border: InputBorder.none,
-                                    hintText: "Add a caption ...",
-                                    labelStyle: TextStyle(
-                                      color: primaryColor,
-                                      fontSize: 16,
+                                    hintText: "Write a caption...",
+                                    hintStyle: const TextStyle(
+                                      color: secondaryColor,
+                                      fontSize: 14,
                                     ),
-                                    suffixIcon: IconButton(
-                                      icon: const Icon(
-                                        Icons.close,
-                                        color: primaryColor,
+                                    prefixIcon: const Icon(
+                                      Icons.emoji_emotions_outlined,
+                                      color: secondaryColor,
+                                    ),
+                                    contentPadding: const EdgeInsets.fromLTRB(
+                                      12,
+                                      14,
+                                      40,
+                                      14,
+                                    ),
+                                    suffixIconConstraints: const BoxConstraints(
+                                      minWidth: 40,
+                                      minHeight: 40,
+                                    ),
+                                    suffixIcon: Align(
+                                      alignment: Alignment.topRight,
+                                      child: IconButton(
+                                        padding: EdgeInsets.zero,
+                                        icon: const Icon(
+                                          Icons.close,
+                                          color: primaryColor,
+                                        ),
+                                        onPressed:
+                                            () => captionController.clear(),
                                       ),
-                                      onPressed: () => captionController.clear(),
                                     ),
                                     filled: true,
-                                    fillColor: mobileBackgroundColor,
+                                    fillColor: _surfaceFill,
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(16),
+                                      borderSide: BorderSide(
+                                        color: _borderLight,
+                                      ),
+                                    ),
+                                    enabledBorder: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(16),
+                                      borderSide: BorderSide(
+                                        color: _borderLight,
+                                      ),
+                                    ),
+                                    focusedBorder: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(16),
+                                      borderSide: const BorderSide(
+                                        color: _brandGreen,
+                                        width: 1.5,
+                                      ),
+                                    ),
                                   ),
                                 ),
+                              ),
+                              const SizedBox(height: 8),
+                              Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 16),
+                                child:
+                                    _postAudioPath == null
+                                        ? _buildCardButton(
+                                          icon: Icons.music_note,
+                                          label: "Add Music",
+                                          onTap: _openPostAudioSheet,
+                                        )
+                                        : Material(
+                                          color: Colors.white,
+                                          elevation: 1.2,
+                                          shadowColor: Colors.black.withOpacity(0.08),
+                                          borderRadius: BorderRadius.circular(16),
+                                          child: Padding(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 12,
+                                              vertical: 10,
+                                            ),
+                                            child: Row(
+                                              children: [
+                                                Container(
+                                                  width: 32,
+                                                  height: 32,
+                                                  decoration: BoxDecoration(
+                                                    color: _surfaceFill,
+                                                    borderRadius:
+                                                        BorderRadius.circular(10),
+                                                  ),
+                                                  child: const Icon(
+                                                    Icons.music_note,
+                                                    color: primaryColor,
+                                                    size: 18,
+                                                  ),
+                                                ),
+                                                const SizedBox(width: 10),
+                                                Expanded(
+                                                  child: Text(
+                                                    _postAudioName ?? "Selected audio",
+                                                    maxLines: 1,
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                    style: const TextStyle(
+                                                      color: primaryColor,
+                                                      fontWeight: FontWeight.w600,
+                                                    ),
+                                                  ),
+                                                ),
+                                                TextButton(
+                                                  onPressed: _openPostAudioSheet,
+                                                  child: const Text(
+                                                    "Edit",
+                                                    style: TextStyle(
+                                                      color: _brandGreen,
+                                                      fontWeight: FontWeight.w600,
+                                                    ),
+                                                  ),
+                                                ),
+                                                IconButton(
+                                                  onPressed: _clearPostAudio,
+                                                  icon: const Icon(
+                                                    Icons.close,
+                                                    color: primaryColor,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
                               ),
                               const SizedBox(height: 12),
                               Padding(
@@ -1542,54 +2399,18 @@ class _AddPostScreenState extends State<AddPostScreen> {
                                 child: Row(
                                   children: [
                                     Expanded(
-                                      child: OutlinedButton.icon(
+                                      child: _buildSoftActionButton(
+                                        icon: Icons.my_location,
+                                        label: "Use current",
                                         onPressed: _setCurrentLocation,
-                                        icon: const Icon(
-                                          Icons.my_location,
-                                          color: primaryColor,
-                                          size: 18,
-                                        ),
-                                        label: const Text(
-                                          "Use current",
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: TextStyle(color: primaryColor),
-                                        ),
-                                        style: OutlinedButton.styleFrom(
-                                          side: const BorderSide(
-                                            color: secondaryColor,
-                                          ),
-                                          shape: RoundedRectangleBorder(
-                                            borderRadius:
-                                                BorderRadius.circular(10),
-                                          ),
-                                        ),
                                       ),
                                     ),
                                     const SizedBox(width: 8),
                                     Expanded(
-                                      child: OutlinedButton.icon(
+                                      child: _buildSoftActionButton(
+                                        icon: Icons.edit_location_alt_outlined,
+                                        label: "Location",
                                         onPressed: _enableManualLocation,
-                                        icon: const Icon(
-                                          Icons.edit_location_alt_outlined,
-                                          color: primaryColor,
-                                          size: 18,
-                                        ),
-                                        label: const Text(
-                                          "Enter location",
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: TextStyle(color: primaryColor),
-                                        ),
-                                        style: OutlinedButton.styleFrom(
-                                          side: const BorderSide(
-                                            color: secondaryColor,
-                                          ),
-                                          shape: RoundedRectangleBorder(
-                                            borderRadius:
-                                                BorderRadius.circular(10),
-                                          ),
-                                        ),
                                       ),
                                     ),
                                   ],
@@ -1602,7 +2423,7 @@ class _AddPostScreenState extends State<AddPostScreen> {
                                       MediaQuery.of(context).size.width * 0.92,
                                   child: LinearProgressIndicator(
                                     borderRadius: BorderRadius.circular(10),
-                                    color: blueColor,
+                                    color: _brandGreen,
                                   ),
                                 ),
                               ],
@@ -1615,12 +2436,12 @@ class _AddPostScreenState extends State<AddPostScreen> {
                                   maxLines: 1,
                                   readOnly: _useCurrentLocation,
                                   textAlignVertical: TextAlignVertical.center,
+                                  style: const TextStyle(color: primaryColor),
                                   decoration: InputDecoration(
-                                    border: InputBorder.none,
                                     hintText: "Add location",
-                                    labelStyle: TextStyle(
-                                      color: primaryColor,
-                                      fontSize: 16,
+                                    hintStyle: const TextStyle(
+                                      color: secondaryColor,
+                                      fontSize: 14,
                                     ),
                                     prefixIcon: const Icon(
                                       Icons.location_on_outlined,
@@ -1650,7 +2471,26 @@ class _AddPostScreenState extends State<AddPostScreen> {
                                       },
                                     ),
                                     filled: true,
-                                    fillColor: mobileBackgroundColor,
+                                    fillColor: _surfaceFill,
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(16),
+                                      borderSide: BorderSide(
+                                        color: _borderLight,
+                                      ),
+                                    ),
+                                    enabledBorder: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(16),
+                                      borderSide: BorderSide(
+                                        color: _borderLight,
+                                      ),
+                                    ),
+                                    focusedBorder: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(16),
+                                      borderSide: const BorderSide(
+                                        color: _brandGreen,
+                                        width: 1.5,
+                                      ),
+                                    ),
                                   ),
                                 ),
                               ),
@@ -1673,6 +2513,75 @@ class _AlbumOption {
   final AssetPathEntity album;
 
   const _AlbumOption({required this.label, required this.album});
+}
+
+class _WaveformTrimView extends StatelessWidget {
+  final double durationSeconds;
+  final double startSeconds;
+  final double endSeconds;
+
+  const _WaveformTrimView({
+    required this.durationSeconds,
+    required this.startSeconds,
+    required this.endSeconds,
+  });
+
+  List<double> _barHeights(int count) {
+    final pattern = <double>[6, 10, 8, 14, 9, 12, 7, 13, 9, 11];
+    return List<double>.generate(
+      count,
+      (index) => pattern[index % pattern.length],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        final safeDuration = durationSeconds <= 0 ? 1.0 : durationSeconds;
+        final startX = (startSeconds / safeDuration) * width;
+        final endX = (endSeconds / safeDuration) * width;
+        final highlightWidth = (endX - startX).clamp(0.0, width);
+        final bars = _barHeights(32);
+
+        return SizedBox(
+          height: 36,
+          child: Stack(
+            alignment: Alignment.centerLeft,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: bars
+                    .map(
+                      (height) => Container(
+                        width: 3,
+                        height: height,
+                        decoration: BoxDecoration(
+                          color: Colors.black12,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    )
+                    .toList(),
+              ),
+              Positioned(
+                left: startX,
+                child: Container(
+                  width: highlightWidth,
+                  height: 30,
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.pinkAccent, width: 2),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
 }
 
 class _StoryToolChip extends StatelessWidget {

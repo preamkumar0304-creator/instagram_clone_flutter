@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'dart:typed_data';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -11,6 +13,7 @@ import 'package:instagram_clone_flutter_firebase/screens/activity_screen.dart';
 import 'package:instagram_clone_flutter_firebase/screens/follow_list_screen.dart';
 import 'package:instagram_clone_flutter_firebase/screens/post_profile.dart';
 import 'package:instagram_clone_flutter_firebase/screens/profile_photo_view.dart';
+import 'package:instagram_clone_flutter_firebase/screens/profile_reels_viewer_screen.dart';
 import 'package:instagram_clone_flutter_firebase/screens/saved_screen.dart';
 import 'package:instagram_clone_flutter_firebase/screens/story_viewer_screen.dart';
 import 'package:instagram_clone_flutter_firebase/screens/add_post_screen.dart';
@@ -24,6 +27,8 @@ import 'package:instagram_clone_flutter_firebase/widgets/share_profile_sheet.dar
 import 'package:instagram_clone_flutter_firebase/widgets/text.dart';
 import 'package:instagram_clone_flutter_firebase/screens/settings_screen.dart';
 import 'package:provider/provider.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:video_thumbnail/video_thumbnail.dart';
 
 class ProfileScreen extends StatefulWidget {
   final String uid;
@@ -1223,7 +1228,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                   Expanded(
                     child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 30),
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -1237,7 +1242,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             ),
                           ),
                           Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                             children: [
                               statColumn(postLength, "posts"),
                               GestureDetector(
@@ -1324,21 +1329,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 const SizedBox(height: 10),
                 const TabBar(
                   indicator: UnderlineTabIndicator(
-                    borderSide: BorderSide(color: Colors.transparent, width: 0),
+                    borderSide: BorderSide(color: primaryColor, width: 1.5),
                   ),
-                  indicatorColor: Colors.transparent,
-                  dividerColor: Colors.transparent,
-                  tabs: [
-                    Tab(icon: Icon(Icons.grid_on, color: primaryColor)),
-                    Tab(icon: Icon(Icons.video_library, color: primaryColor)),
-                    Tab(icon: Icon(Icons.person_pin, color: primaryColor)),
+                  indicatorColor: primaryColor,
+                  dividerColor: Colors.grey,
+                  labelColor: primaryColor,
+                  unselectedLabelColor: secondaryColor,
+                  tabs: const [
+                    Tab(icon: Icon(Icons.grid_on)),
+                    Tab(icon: Icon(Icons.video_library)),
+                    Tab(icon: Icon(Icons.person_pin)),
                   ],
                 ),
                 Expanded(
                   child: TabBarView(
                     children: [
                       _PostsGrid(uid: widget.uid),
-                      const _PlaceholderTab(label: "Reels coming soon"),
+                      _ReelsGrid(uid: widget.uid),
                       const _PlaceholderTab(label: "Tagged posts coming soon"),
                     ],
                   ),
@@ -1508,6 +1515,333 @@ class _PostsGrid extends StatelessWidget {
   }
 }
 
+class _ReelsGrid extends StatelessWidget {
+  final String uid;
+
+  const _ReelsGrid({required this.uid});
+
+  String _safeString(dynamic value) {
+    if (value == null) return "";
+    return value.toString();
+  }
+
+  bool _matchesOwner(Map<String, dynamic> data) {
+    final ownerUid = _safeString(data["uid"]);
+    final userId = _safeString(data["userId"]);
+    final profileUid = _safeString(data["profileUid"]);
+    return ownerUid == uid || userId == uid || profileUid == uid;
+  }
+
+  DateTime _extractTime(dynamic value) {
+    if (value is Timestamp) return value.toDate();
+    if (value is DateTime) return value;
+    return DateTime.fromMillisecondsSinceEpoch(0);
+  }
+
+  Widget _fallbackTile() {
+    return Container(
+      color: Colors.grey.shade200,
+      child: const Center(
+        child: Icon(
+          Icons.play_circle_outline,
+          color: secondaryColor,
+          size: 30,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _confirmDelete({
+    required BuildContext context,
+    required String reelId,
+    required String reelUrl,
+    required String thumbnailUrl,
+    required String coverUrl,
+  }) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: mobileBackgroundColor,
+          title: const Text(
+            "Delete reel?",
+            style: TextStyle(color: primaryColor),
+          ),
+          content: const Text(
+            "This reel will be removed from your profile.",
+            style: TextStyle(color: secondaryColor),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text("Cancel", style: TextStyle(color: primaryColor)),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text("Delete", style: TextStyle(color: errorColor)),
+            ),
+          ],
+        );
+      },
+    );
+    if (confirmed != true) return;
+
+    final message = await FirestoreMethods().deleteReel(
+      reelId: reelId,
+      reelUrl: reelUrl,
+      thumbnailUrl: thumbnailUrl,
+      coverUrl: coverUrl,
+    );
+
+    if (!context.mounted) return;
+    final isSuccess = message.toLowerCase().contains("deleted");
+    showSnackBar(
+      context: context,
+      content: message,
+      clr: isSuccess ? successColor : errorColor,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream:
+          FirebaseFirestore.instance
+              .collection("reels")
+              .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(
+            child: CircularProgressIndicator(color: primaryColor),
+          );
+        }
+        final allDocs =
+            List<QueryDocumentSnapshot<Map<String, dynamic>>>.from(
+              snapshot.data?.docs ?? [],
+            );
+        final docs =
+            allDocs
+                .where((doc) => _matchesOwner(doc.data()))
+                .toList(growable: false);
+        docs.sort((a, b) {
+          final aData = a.data();
+          final bData = b.data();
+          final aTime =
+              _extractTime(aData["createdAt"]).isAfter(
+                    _extractTime(aData["timestamp"]),
+                  )
+                  ? _extractTime(aData["createdAt"])
+                  : _extractTime(aData["timestamp"]);
+          final bTime =
+              _extractTime(bData["createdAt"]).isAfter(
+                    _extractTime(bData["timestamp"]),
+                  )
+                  ? _extractTime(bData["createdAt"])
+                  : _extractTime(bData["timestamp"]);
+          return bTime.compareTo(aTime);
+        });
+        if (docs.isEmpty) {
+          return const Center(
+            child: Text(
+              "No reels yet.",
+              style: TextStyle(color: primaryColor),
+            ),
+          );
+        }
+        final currentUid = FirebaseAuth.instance.currentUser?.uid ?? "";
+        final isOwner = currentUid == uid;
+        final reels = docs.map((doc) => doc.data()).toList();
+        return GridView.builder(
+          itemCount: docs.length,
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 3,
+            crossAxisSpacing: 5,
+            mainAxisSpacing: 1.5,
+            childAspectRatio: 9 / 16,
+          ),
+          itemBuilder: (context, index) {
+            final data = docs[index].data();
+            final reelId =
+                _safeString(data["reelId"]).isNotEmpty
+                    ? _safeString(data["reelId"])
+                    : docs[index].id;
+            final reelUrl = _safeString(data["reelUrl"]);
+            final thumbnailUrl = _safeString(data["thumbnailUrl"]);
+            final profilePhoto = _safeString(data["photoUrl"]);
+            final rawCoverUrl = _safeString(data["coverUrl"]);
+            final coverUrl =
+                rawCoverUrl.isNotEmpty && rawCoverUrl != profilePhoto
+                    ? rawCoverUrl
+                    : "";
+            final previewUrl =
+                thumbnailUrl.isNotEmpty
+                    ? thumbnailUrl
+                    : (coverUrl.isNotEmpty ? coverUrl : "");
+            return GestureDetector(
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder:
+                        (_) => ProfileReelsViewerScreen(
+                          reels: reels,
+                          initialIndex: index,
+                        ),
+                  ),
+                );
+              },
+              onLongPress:
+                  isOwner
+                      ? () => _confirmDelete(
+                        context: context,
+                        reelId: reelId,
+                        reelUrl: reelUrl,
+                        thumbnailUrl: thumbnailUrl,
+                        coverUrl: coverUrl,
+                      )
+                      : null,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Stack(
+                  children: [
+                    Positioned.fill(
+                      child: _ReelThumbnail(
+                        thumbnailUrl: previewUrl,
+                        reelUrl: reelUrl,
+                        fallback: _fallbackTile(),
+                      ),
+                    ),
+                    const Align(
+                      alignment: Alignment.center,
+                      child: Icon(
+                        Icons.play_circle_fill,
+                        color: Colors.white70,
+                        size: 24,
+                      ),
+                    ),
+                    if (isOwner)
+                      Positioned(
+                        right: 2,
+                        top: 2,
+                        child: PopupMenuButton<String>(
+                          color: mobileBackgroundColor,
+                          icon: const Icon(
+                            Icons.more_vert,
+                            color: Colors.white,
+                            size: 18,
+                          ),
+                          onSelected: (value) {
+                            if (value == "delete") {
+                              _confirmDelete(
+                                context: context,
+                                reelId: reelId,
+                                reelUrl: reelUrl,
+                                thumbnailUrl: thumbnailUrl,
+                                coverUrl: coverUrl,
+                              );
+                            }
+                          },
+                          itemBuilder:
+                              (context) => const [
+                                PopupMenuItem(
+                                  value: "delete",
+                                  child: Text("Delete"),
+                                ),
+                              ],
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+class _ReelThumbnail extends StatefulWidget {
+  final String thumbnailUrl;
+  final String reelUrl;
+  final Widget fallback;
+
+  const _ReelThumbnail({
+    required this.thumbnailUrl,
+    required this.reelUrl,
+    required this.fallback,
+  });
+
+  @override
+  State<_ReelThumbnail> createState() => _ReelThumbnailState();
+}
+
+class _ReelThumbnailState extends State<_ReelThumbnail> {
+  Future<Uint8List?>? _thumbFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.thumbnailUrl.isEmpty) {
+      _thumbFuture = _generateThumbnail();
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _ReelThumbnail oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.thumbnailUrl.isNotEmpty) {
+      _thumbFuture = null;
+      return;
+    }
+    if (oldWidget.thumbnailUrl.isNotEmpty && widget.thumbnailUrl.isEmpty) {
+      _thumbFuture = _generateThumbnail();
+    }
+  }
+
+  Future<Uint8List?> _generateThumbnail() async {
+    if (widget.reelUrl.isEmpty) return null;
+    try {
+      final bytes = await VideoThumbnail.thumbnailData(
+        video: widget.reelUrl,
+        imageFormat: ImageFormat.JPEG,
+        maxWidth: 720,
+        quality: 75,
+        timeMs: 1000,
+      );
+      return bytes;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.thumbnailUrl.isNotEmpty) {
+      return CachedNetworkImage(
+        imageUrl: widget.thumbnailUrl,
+        fit: BoxFit.cover,
+        placeholder: (_, __) => widget.fallback,
+        errorWidget: (_, __, ___) => widget.fallback,
+      );
+    }
+
+    return FutureBuilder<Uint8List?>(
+      future: _thumbFuture,
+      builder: (context, snapshot) {
+        final bytes = snapshot.data;
+        if (bytes == null || bytes.isEmpty) {
+          return widget.fallback;
+        }
+        return Image.memory(
+          bytes,
+          fit: BoxFit.cover,
+          gaplessPlayback: true,
+        );
+      },
+    );
+  }
+}
+
 class _PlaceholderTab extends StatelessWidget {
   final String label;
 
@@ -1639,7 +1973,7 @@ Widget _highlightItem({IconData? icon, required String label, VoidCallback? onTa
 
 Column statColumn(int num, String label) {
   return Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
+    crossAxisAlignment: CrossAxisAlignment.center,
     children: [
       MyText(
         text: num.toString(),

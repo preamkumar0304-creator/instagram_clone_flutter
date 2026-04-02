@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 class MyText extends StatelessWidget {
   final String text;
@@ -15,6 +16,13 @@ class MyText extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Text(text, style: TextStyle(color: textClr, fontSize: textSize,fontWeight: textWeight));
+    return Text(
+      text,
+      style: GoogleFonts.inter(
+        color: textClr,
+        fontSize: textSize,
+        fontWeight: textWeight,
+      ),
+    );
   }
 }

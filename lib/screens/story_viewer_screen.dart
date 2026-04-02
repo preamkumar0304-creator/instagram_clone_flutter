@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:instagram_clone_flutter_firebase/methods/firestore_methods.dart';
@@ -6,6 +8,7 @@ import 'package:instagram_clone_flutter_firebase/responsive/responsive_layout_sc
 import 'package:instagram_clone_flutter_firebase/responsive/web_screen_layout.dart';
 import 'package:instagram_clone_flutter_firebase/utils/colors.dart';
 import 'package:instagram_clone_flutter_firebase/utils/utils.dart';
+import 'package:just_audio/just_audio.dart';
 import 'package:video_player/video_player.dart';
 
 class StoryViewerScreen extends StatefulWidget {
@@ -38,11 +41,25 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
   String _activeVideoUrl = "";
   bool _isVideoReady = false;
   bool _isHolding = false;
+  final AudioPlayer _audioPlayer = AudioPlayer();
+  StreamSubscription<Duration>? _audioPositionSub;
+  String _activeAudioUrl = "";
+  double _activeAudioStart = 0;
+  double _activeAudioEnd = 0;
+  bool _isAudioReady = false;
+  Timer? _labelTimer;
+  bool _showAudioLabel = true;
 
   int _safeInt(dynamic value) {
     if (value is int) return value;
     if (value is num) return value.toInt();
     return 0;
+  }
+
+  double _safeDouble(dynamic value) {
+    if (value is double) return value;
+    if (value is num) return value.toDouble();
+    return 0.0;
   }
 
   List<String> _safeStringList(dynamic value) {
@@ -362,6 +379,16 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
               _advanceStory();
             }
           });
+    _audioPositionSub = _audioPlayer.positionStream.listen((position) {
+      if (!_isAudioReady) return;
+      final seconds = position.inMilliseconds / 1000.0;
+      if (_activeAudioEnd > 0 && seconds >= _activeAudioEnd - 0.05) {
+        _audioPlayer.pause();
+        _audioPlayer.seek(
+          Duration(milliseconds: (_activeAudioStart * 1000).round()),
+        );
+      }
+    });
     if (widget.viewerUid == widget.ownerUid) {
       FirestoreMethods().archiveExpiredStories(widget.ownerUid);
     }
@@ -372,6 +399,9 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
     _pageController.dispose();
     _progressController.dispose();
     _videoController?.dispose();
+    _audioPositionSub?.cancel();
+    _audioPlayer.dispose();
+    _labelTimer?.cancel();
     super.dispose();
   }
 
@@ -387,12 +417,18 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
     if (_videoController != null && _isVideoReady) {
       _videoController!.pause();
     }
+    if (_isAudioReady) {
+      _audioPlayer.pause();
+    }
   }
 
   void _resumeStory() {
     if (_progressController.value >= 1.0) return;
     if (_videoController != null && _isVideoReady) {
       _videoController!.play();
+    }
+    if (_isAudioReady) {
+      _audioPlayer.play();
     }
     if (!_progressController.isAnimating) {
       _progressController.forward();
@@ -454,6 +490,86 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
     }
   }
 
+  Future<void> _disposeAudio() async {
+    try {
+      await _audioPlayer.pause();
+    } catch (_) {}
+    try {
+      await _audioPlayer.seek(Duration.zero);
+    } catch (_) {}
+    _activeAudioUrl = "";
+    _activeAudioStart = 0;
+    _activeAudioEnd = 0;
+    _isAudioReady = false;
+  }
+
+  Future<void> _prepareAudio(Map<String, dynamic> story) async {
+    final audioUrl = (story["audioUrl"] ?? "").toString();
+    if (audioUrl.isEmpty) {
+      await _disposeAudio();
+      return;
+    }
+    final startSeconds = _safeDouble(story["audioStart"]);
+    var endSeconds = _safeDouble(story["audioEnd"]);
+    if (endSeconds <= startSeconds) {
+      final durationSeconds = _safeInt(story["storyDuration"]);
+      if (durationSeconds > 0) {
+        endSeconds = startSeconds + durationSeconds.toDouble();
+      }
+    }
+    if (_activeAudioUrl != audioUrl) {
+      await _disposeAudio();
+      try {
+        await _audioPlayer.setUrl(audioUrl);
+        await _audioPlayer.setVolume(1.0);
+        _isAudioReady = true;
+      } catch (_) {
+        _isAudioReady = false;
+        return;
+      }
+    }
+    _activeAudioUrl = audioUrl;
+    _activeAudioStart = startSeconds;
+    _activeAudioEnd = endSeconds;
+    final seekSeconds = startSeconds > 0 ? startSeconds : 0;
+    try {
+      await _audioPlayer.seek(
+        Duration(milliseconds: (seekSeconds * 1000).round()),
+      );
+      await _audioPlayer.play();
+    } catch (_) {}
+  }
+
+  void _startLabelTicker(Map<String, dynamic> story) {
+    _labelTimer?.cancel();
+    final audioName = (story["audioName"] ?? "").toString();
+    final location = (story["location"] ?? "").toString();
+    if (audioName.isEmpty) {
+      _showAudioLabel = false;
+      if (mounted) {
+        setState(() {});
+      }
+      return;
+    }
+    if (location.isEmpty) {
+      _showAudioLabel = true;
+      if (mounted) {
+        setState(() {});
+      }
+      return;
+    }
+    _showAudioLabel = true;
+    if (mounted) {
+      setState(() {});
+    }
+    _labelTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (!mounted) return;
+      setState(() {
+        _showAudioLabel = !_showAudioLabel;
+      });
+    });
+  }
+
   Future<void> _prepareStory(Map<String, dynamic> story) async {
     final storyId =
         (story["_docId"] ?? story["storyId"] ?? "").toString();
@@ -466,6 +582,8 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
             : (isVideo ? _videoDuration : _imageDuration);
     if (storyId.isNotEmpty && storyId == _activeStoryId) return;
     _activeStoryId = storyId;
+    await _prepareAudio(story);
+    _startLabelTicker(story);
 
     if (isVideo) {
       final url = (story["storyUrl"] ?? "").toString();
@@ -526,6 +644,9 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
               _activeStoryId = "";
               _activeVideoUrl = "";
               _isVideoReady = false;
+              _audioPlayer.pause();
+              _activeAudioUrl = "";
+              _isAudioReady = false;
               return const Center(
                 child: Text(
                   "Unable to load stories",
@@ -547,6 +668,9 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
               _activeStoryId = "";
               _activeVideoUrl = "";
               _isVideoReady = false;
+              _audioPlayer.pause();
+              _activeAudioUrl = "";
+              _isAudioReady = false;
               return const Center(
                 child: Text(
                   "No stories",
@@ -642,6 +766,9 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
               _activeStoryId = "";
               _activeVideoUrl = "";
               _isVideoReady = false;
+              _audioPlayer.pause();
+              _activeAudioUrl = "";
+              _isAudioReady = false;
               return const Center(
                 child: Text(
                   "No stories",
@@ -859,6 +986,56 @@ class _StoryViewerScreenState extends State<StoryViewerScreen>
                       ),
                     ],
                   ),
+                ),
+                Builder(
+                  builder: (context) {
+                    final audioName =
+                        (stories[_currentIndex]["audioName"] ?? "").toString();
+                    final location =
+                        (stories[_currentIndex]["location"] ?? "").toString();
+                    final showAudio = location.isEmpty || _showAudioLabel;
+                    final labelText = showAudio ? audioName : location;
+                    if (labelText.isEmpty) {
+                      return const SizedBox.shrink();
+                    }
+                    return Positioned(
+                      top: 56,
+                      left: 16,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.45),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.white24),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              showAudio ? Icons.music_note : Icons.location_on,
+                              color: Colors.white,
+                              size: 14,
+                            ),
+                            const SizedBox(width: 6),
+                            ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 180),
+                              child: Text(
+                                labelText,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
                 ),
                 if (widget.viewerUid == widget.ownerUid)
                   Positioned(

@@ -72,9 +72,16 @@ class _ShareReelSheetState extends State<ShareReelSheet> {
     return ids.join("_");
   }
 
+  String _effectiveCoverUrl() {
+    if (widget.reelCoverUrl.isEmpty) return "";
+    if (widget.reelCoverUrl == widget.reelOwnerPhotoUrl) return "";
+    return widget.reelCoverUrl;
+  }
+
   Future<void> _sendTo(String targetUid) async {
     final fromUid = FirebaseAuth.instance.currentUser!.uid;
     final chatId = _chatId(fromUid, targetUid);
+    final coverUrl = _effectiveCoverUrl();
     await FirebaseFirestore.instance
         .collection("chats")
         .doc(chatId)
@@ -89,7 +96,7 @@ class _ShareReelSheetState extends State<ShareReelSheet> {
           "reelOwnerUid": widget.reelOwnerUid,
           "reelOwnerUsername": widget.reelOwnerUsername,
           "reelOwnerPhotoUrl": widget.reelOwnerPhotoUrl,
-          "reelCoverUrl": widget.reelCoverUrl,
+          "reelCoverUrl": coverUrl,
           "reelThumbnailUrl": widget.reelThumbnailUrl,
           "createdAt": FieldValue.serverTimestamp(),
           "createdAtLocal": DateTime.now(),
@@ -101,9 +108,7 @@ class _ShareReelSheetState extends State<ShareReelSheet> {
       type: "share_reel",
       reelId: widget.reelId,
       reelCoverUrl:
-          widget.reelCoverUrl.isNotEmpty
-              ? widget.reelCoverUrl
-              : widget.reelThumbnailUrl,
+          coverUrl.isNotEmpty ? coverUrl : widget.reelThumbnailUrl,
       message: "Shared a reel",
     );
   }

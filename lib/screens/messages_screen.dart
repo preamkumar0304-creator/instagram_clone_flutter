@@ -17,7 +17,8 @@ class MessagesScreen extends StatefulWidget {
   State<MessagesScreen> createState() => _MessagesScreenState();
 }
 
-class _MessagesScreenState extends State<MessagesScreen> {
+class _MessagesScreenState extends State<MessagesScreen>
+    with AutomaticKeepAliveClientMixin {
 
   List<String> _safeStringList(dynamic value) {
     if (value is List) {
@@ -333,6 +334,7 @@ class _MessagesScreenState extends State<MessagesScreen> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     final currentUid = FirebaseAuth.instance.currentUser?.uid;
     if (currentUid == null) {
       return const Center(
@@ -623,4 +625,7 @@ class _MessagesScreenState extends State<MessagesScreen> {
       ),
     );
   }
+
+  @override
+  bool get wantKeepAlive => true;
 }
