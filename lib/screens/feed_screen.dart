@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_feather_icons/flutter_feather_icons.dart';
@@ -36,26 +34,31 @@ class _FeedScreenState extends State<FeedScreen>
   Future<List<Map<String, dynamic>>>? _privacyFuture;
   int _privacySignature = 0;
   final FeedRanker _ranker = FeedRanker();
-  Timer? _rankingTicker;
+  List<Map<String, dynamic>> _cachedPosts = const [];
+  bool _isLoadingFeed = true;
+  bool _isRefreshing = false;
+  String? _feedError;
   int _pageSize = 20;
   final int _pageStep = 10;
+  late final VoidCallback _homeTabListener;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _rankingTicker = Timer.periodic(const Duration(seconds: 45), (_) {
-      if (!mounted) return;
-      setState(() {
-        // Trigger re-ranking so decay pushes older posts down over time.
-      });
-    });
+    _homeTabListener = () {
+      if (homeTabIndexNotifier.value != 0) {
+        AudioManager.instance.pauseAudio();
+      }
+    };
+    homeTabIndexNotifier.addListener(_homeTabListener);
+    _loadFeed();
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _rankingTicker?.cancel();
+    homeTabIndexNotifier.removeListener(_homeTabListener);
     AudioManager.instance.stopAudio();
     super.dispose();
   }
@@ -73,13 +76,6 @@ class _FeedScreenState extends State<FeedScreen>
     if (value is int) return value;
     if (value is num) return value.toInt();
     return 0;
-  }
-
-  DateTime _extractPostedAt(Map<String, dynamic> post) {
-    final raw = post["postedDate"] ?? post["createdAt"];
-    if (raw is Timestamp) return raw.toDate();
-    if (raw is DateTime) return raw;
-    return DateTime.fromMillisecondsSinceEpoch(0);
   }
 
   List<Map<String, dynamic>> _applyBoostPattern(
@@ -210,6 +206,52 @@ class _FeedScreenState extends State<FeedScreen>
     Set<String> allowedUids,
   ) {
     return Object.hash(_hashPosts(posts), _hashAllowedUids(allowedUids));
+  }
+
+  Future<void> _loadFeed({bool forceRefresh = false}) async {
+    if (_isRefreshing) return;
+    if (!forceRefresh && _cachedPosts.isNotEmpty) return;
+
+    setState(() {
+      _feedError = null;
+      if (forceRefresh) {
+        _isRefreshing = true;
+      } else {
+        _isLoadingFeed = true;
+      }
+    });
+
+    try {
+      final snapshot =
+          await FirebaseFirestore.instance
+              .collection("posts")
+              .orderBy("postedDate", descending: true)
+              .get();
+      final posts = snapshot.docs.map((doc) => doc.data()).toList();
+      if (!mounted) return;
+      setState(() {
+        _cachedPosts = posts;
+        _privacyFuture = null;
+        _privacySignature = 0;
+        _pageSize = 20;
+        _feedError = null;
+      });
+    } catch (err) {
+      if (!mounted) return;
+      setState(() {
+        _feedError = err.toString();
+      });
+    } finally {
+      if (!mounted) return;
+      setState(() {
+        _isLoadingFeed = false;
+        _isRefreshing = false;
+      });
+    }
+  }
+
+  Future<void> _onPullToRefresh() async {
+    await _loadFeed(forceRefresh: true);
   }
 
   void _maybeLoadMore(ScrollMetrics metrics, int totalCount) {
@@ -491,8 +533,8 @@ class _FeedScreenState extends State<FeedScreen>
                 ),
                 title: Image.asset(
                   "assets/icon/logo.2.png",
-                  height: 150,
-                  width: 170,
+                  height: 36,
+                  width: 132,
                   fit: BoxFit.contain,
                   errorBuilder: (context, error, stackTrace) {
                     return const SizedBox(
@@ -537,33 +579,52 @@ class _FeedScreenState extends State<FeedScreen>
                   ),
                 ],
               ),
-      body: StreamBuilder(
-        stream:
-            FirebaseFirestore.instance
-                .collection("posts")
-                .orderBy("postedDate", descending: true)
-                .snapshots(),
-        builder: (
-          context,
-          AsyncSnapshot<QuerySnapshot<Map<String, dynamic>>> snapshots,
-        ) {
-          if (snapshots.connectionState == ConnectionState.waiting) {
-            return Center(child: CircularProgressIndicator());
+      body: Builder(
+        builder: (context) {
+          if (_isLoadingFeed && _cachedPosts.isEmpty) {
+            return const Center(
+              child: CircularProgressIndicator(color: primaryColor),
+            );
           }
-          final postData =
-              snapshots.data!.docs.map((d) => d.data()).toList();
-          final muted =
-              (user.mutedUsers as List).whereType<String>().toSet();
+          if (_feedError != null && _cachedPosts.isEmpty) {
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      "Unable to load feed.",
+                      style: TextStyle(
+                        color: primaryColor,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      _feedError!,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: secondaryColor),
+                    ),
+                    const SizedBox(height: 16),
+                    TextButton(
+                      onPressed: () => _loadFeed(forceRefresh: true),
+                      child: const Text("Retry"),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }
+
+          final muted = (user.mutedUsers as List).whereType<String>().toSet();
           final blocked =
               (user.blockedUsers as List).whereType<String>().toSet();
           final filteredPosts =
-              postData.where((post) {
+              _cachedPosts.where((post) {
                 final uid = (post["uid"] ?? "").toString();
                 if (uid.isEmpty) return false;
-                if (muted.contains(uid) || blocked.contains(uid)) {
-                  return false;
-                }
-                return true;
+                return !muted.contains(uid) && !blocked.contains(uid);
               }).toList();
           final allowedUids = <String>{
             user.uid,
@@ -577,79 +638,87 @@ class _FeedScreenState extends State<FeedScreen>
               allowedUids: allowedUids,
             );
           }
+
           return FutureBuilder<List<Map<String, dynamic>>>(
             future: _privacyFuture,
             builder: (context, privacySnap) {
+              if (privacySnap.connectionState == ConnectionState.waiting &&
+                  privacySnap.data == null) {
+                return const Center(
+                  child: CircularProgressIndicator(color: primaryColor),
+                );
+              }
+
               final visiblePosts = privacySnap.data ?? [];
               final followingOnly =
                   visiblePosts.where((post) {
                     final uid = (post["uid"] ?? "").toString();
                     return allowedUids.contains(uid);
                   }).toList();
-              if (privacySnap.connectionState == ConnectionState.waiting) {
-                return const Center(
-                  child: CircularProgressIndicator(color: primaryColor),
-                );
-              }
               final rankedPosts =
                   _ranker.rankPosts(posts: followingOnly, viewer: user);
               final rankedWithBoost = _applyBoostPattern(rankedPosts);
               final totalCount = rankedWithBoost.length;
-              final pageSize =
-                  totalCount < _pageSize ? totalCount : _pageSize;
+              final pageSize = totalCount < _pageSize ? totalCount : _pageSize;
               final pagedPosts = rankedWithBoost.take(pageSize).toList();
-              return NotificationListener<ScrollNotification>(
-                onNotification: (notification) {
-                  if (notification is ScrollStartNotification ||
-                      notification is ScrollUpdateNotification) {
-                    AudioManager.instance.stopAudio();
-                  }
-                  if (notification.metrics.axis == Axis.vertical) {
-                    _maybeLoadMore(notification.metrics, totalCount);
-                  }
-                  return false;
-                },
-                child: ListView.builder(
-                  key: const PageStorageKey<String>("feed_list"),
-                  itemCount: pagedPosts.length + 1,
-                  itemBuilder: (context, index) {
-                    if (index == 0) {
-                      return Container(
-                        margin: EdgeInsets.symmetric(
-                          horizontal: width > webScreenSize ? width * 0.3 : 0,
-                        ),
-                        child: _StoriesRow(user: user),
-                      );
+              final horizontalMargin = width > webScreenSize ? width * 0.28 : 0.0;
+
+              return RefreshIndicator(
+                onRefresh: _onPullToRefresh,
+                color: primaryColor,
+                child: NotificationListener<ScrollNotification>(
+                  onNotification: (notification) {
+                    if (notification is ScrollStartNotification ||
+                        notification is ScrollUpdateNotification) {
+                      AudioManager.instance.stopAudio();
                     }
-                    final post = pagedPosts[index - 1];
-                    final postId =
-                        (post["postId"] ?? post["id"] ?? "").toString();
-                    return Container(
-                      margin: EdgeInsets.symmetric(
-                        horizontal: width > webScreenSize ? width * 0.3 : 0,
-                        vertical: width > webScreenSize ? 15 : 0,
-                      ),
-                      child: AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 250),
-                        switchInCurve: Curves.easeOut,
-                        switchOutCurve: Curves.easeIn,
-                        transitionBuilder: (child, animation) {
-                          final slide = Tween<Offset>(
-                            begin: const Offset(0, 0.02),
-                            end: Offset.zero,
-                          ).animate(animation);
-                          return FadeTransition(
-                            opacity: animation,
-                            child: SlideTransition(position: slide, child: child),
-                          );
-                        },
+                    if (notification.metrics.axis == Axis.vertical) {
+                      _maybeLoadMore(notification.metrics, totalCount);
+                    }
+                    return false;
+                  },
+                  child: ListView.builder(
+                    key: const PageStorageKey<String>("feed_list"),
+                    physics: const AlwaysScrollableScrollPhysics(
+                      parent: BouncingScrollPhysics(),
+                    ),
+                    itemCount: pagedPosts.isEmpty ? 2 : pagedPosts.length + 1,
+                    itemBuilder: (context, index) {
+                      if (index == 0) {
+                        return Padding(
+                          padding: EdgeInsets.symmetric(horizontal: horizontalMargin),
+                          child: _StoriesRow(user: user),
+                        );
+                      }
+                      if (pagedPosts.isEmpty) {
+                        return const Padding(
+                          padding: EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 32,
+                          ),
+                          child: Center(
+                            child: Text(
+                              "No posts available. Pull to refresh.",
+                              style: TextStyle(color: secondaryColor),
+                            ),
+                          ),
+                        );
+                      }
+                      final post = pagedPosts[index - 1];
+                      final postId =
+                          (post["postId"] ?? post["id"] ?? "").toString();
+                      return Padding(
+                        padding: EdgeInsets.symmetric(
+                          horizontal: horizontalMargin,
+                          vertical: width > webScreenSize ? 12 : 0,
+                        ),
                         child: PostCard(
                           key: ValueKey("feed-$postId"),
                           snap: post,
                         ),
-                      ),
-                    );
-                  },
+                      );
+                    },
+                  ),
                 ),
               );
             },

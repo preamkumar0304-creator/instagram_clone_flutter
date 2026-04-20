@@ -356,7 +356,7 @@ class _PostCardState extends State<PostCard> {
       key: ValueKey("post-$postId"),
       onVisibilityChanged: _handleVisibility,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        padding: const EdgeInsets.symmetric(vertical: 8),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [

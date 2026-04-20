@@ -22,11 +22,13 @@ class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController emailController = TextEditingController();
   final TextEditingController passwordController = TextEditingController();
   bool _isLoading = false;
+  bool _obscurePassword = true;
+
   @override
   void dispose() {
-    super.dispose();
     emailController.dispose();
     passwordController.dispose();
+    super.dispose();
   }
 
   @override
@@ -39,11 +41,11 @@ class _LoginScreenState extends State<LoginScreen> {
                   ? EdgeInsets.symmetric(
                     horizontal: MediaQuery.of(context).size.width / 3,
                   )
-                  : const EdgeInsets.only(left: 20, right: 20),
+                  : const EdgeInsets.symmetric(horizontal: 16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Flexible(flex: 1, child: Container()),
+              const Spacer(),
               Image.asset(
                 "assets/branding/logo.1.png",
                 height: 64,
@@ -57,70 +59,77 @@ class _LoginScreenState extends State<LoginScreen> {
                   );
                 },
               ),
-              const SizedBox(height: 120),
-              Padding(
-                padding: const EdgeInsets.only(bottom: 5),
-                child: TextFieldInput(
-                  labelText: "Username, email address or mobile number",
-                  textEditingController: emailController,
-                  textInputType: TextInputType.emailAddress,
-                ),
+              const SizedBox(height: 32),
+              TextFieldInput(
+                labelText: "Username, email address or mobile number",
+                textEditingController: emailController,
+                textInputType: TextInputType.emailAddress,
               ),
-              Padding(
-                padding: const EdgeInsets.only(top: 5, bottom: 5),
-                child: TextFieldInput(
-                  labelText: "Password",
-                  textEditingController: passwordController,
-                  textInputType: TextInputType.text,
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.only(top: 5, bottom: 5),
-                child: MyElevatedButton(
-                  buttonText: "Log in",
-                  isLoading: _isLoading,
-                  textClr: Colors.white,
-                  onPressed: () async {
+              const SizedBox(height: 12),
+              TextFieldInput(
+                labelText: "Password",
+                textEditingController: passwordController,
+                textInputType: TextInputType.text,
+                obscureText: _obscurePassword,
+                suffixIcon: IconButton(
+                  icon: Icon(
+                    _obscurePassword
+                        ? Icons.visibility_off_outlined
+                        : Icons.visibility_outlined,
+                    color: secondaryColor,
+                  ),
+                  onPressed: () {
                     setState(() {
-                      _isLoading = true;
+                      _obscurePassword = !_obscurePassword;
                     });
-                    String message = await AuthMethods()
-                        .loginWithEmailAndPassword(
-                          email: emailController.text.trim(),
-                          password: passwordController.text.trim(),
-                        );
-                    setState(() {
-                      _isLoading = false;
-                    });
-                    if (message == "User Logged In Successfully!") {
-                      if (context.mounted) {
-                        Navigator.pushReplacement(
-                          context,
-                          MaterialPageRoute(
-                            builder:
-                                (context) => const ResponsiveLayout(
-                                  webScreenLayout: WebScreenLayout(),
-                                  mobileScreenLayout: MobileScreenLayout(),
-                                ),
-                          ),
-                        );
-                      }
-                    } else {
-                      if (context.mounted) {
-                        showSnackBar(
-                          context: context,
-                          content: message,
-                          clr: errorColor,
-                        );
-                      }
-                    }
                   },
                 ),
               ),
+              const SizedBox(height: 16),
+              MyElevatedButton(
+                buttonText: "Log in",
+                isLoading: _isLoading,
+                textClr: Colors.white,
+                onPressed: () async {
+                  setState(() {
+                    _isLoading = true;
+                  });
+                  String message = await AuthMethods().loginWithEmailAndPassword(
+                    email: emailController.text.trim(),
+                    password: passwordController.text.trim(),
+                  );
+                  setState(() {
+                    _isLoading = false;
+                  });
+                  if (message == "User Logged In Successfully!") {
+                    if (context.mounted) {
+                      Navigator.pushReplacement(
+                        context,
+                        MaterialPageRoute(
+                          builder:
+                              (context) => const ResponsiveLayout(
+                                webScreenLayout: WebScreenLayout(),
+                                mobileScreenLayout: MobileScreenLayout(),
+                              ),
+                        ),
+                      );
+                    }
+                  } else {
+                    if (context.mounted) {
+                      showSnackBar(
+                        context: context,
+                        content: message,
+                        clr: errorColor,
+                      );
+                    }
+                  }
+                },
+              ),
+              const SizedBox(height: 8),
               MyTextButton(buttonText: "Forgotten password?", onPressed: () {}),
-              Flexible(flex: 1, child: Container()),
+              const Spacer(),
               Padding(
-                padding: const EdgeInsets.only(top: 5),
+                padding: const EdgeInsets.only(bottom: 12),
                 child: MyElevatedButton(
                   onPressed: () {
                     Navigator.push(

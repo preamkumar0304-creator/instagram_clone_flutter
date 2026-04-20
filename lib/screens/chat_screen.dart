@@ -436,6 +436,21 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (route != null && !route.isCurrent) {
+      _audioPlayer.pause();
+    }
+  }
+
+  @override
+  void deactivate() {
+    _audioPlayer.pause();
+    super.deactivate();
+  }
+
+  @override
   void dispose() {
     _messageController.dispose();
     _audioPlayer.dispose();
@@ -1085,6 +1100,21 @@ class _VideoPreviewState extends State<_VideoPreview> {
   void dispose() {
     _controller?.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (route != null && !route.isCurrent) {
+      _controller?.pause();
+    }
+  }
+
+  @override
+  void deactivate() {
+    _controller?.pause();
+    super.deactivate();
   }
 
   @override

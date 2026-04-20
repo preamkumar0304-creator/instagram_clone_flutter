@@ -1,5 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:instagram_clone_flutter_firebase/utils/audio_manager.dart';
 import 'package:instagram_clone_flutter_firebase/utils/colors.dart';
 import 'package:instagram_clone_flutter_firebase/utils/global_variables.dart';
 
@@ -26,6 +27,8 @@ class _MobileScreenLayoutState extends State<MobileScreenLayout> {
   }
 
   void _onPageChanged(int page) {
+    AudioManager.instance.pauseAudio();
+    homeTabIndexNotifier.value = page;
     setState(() {
       _currentIndex = page;
     });
@@ -51,6 +54,7 @@ class _MobileScreenLayoutState extends State<MobileScreenLayout> {
   void initState() {
     super.initState();
     _pageController = PageController();
+    homeTabIndexNotifier.value = _currentIndex;
   }
 
   @override

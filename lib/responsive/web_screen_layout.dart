@@ -1,6 +1,7 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:instagram_clone_flutter_firebase/providers/user_provider.dart';
+import 'package:instagram_clone_flutter_firebase/utils/audio_manager.dart';
 import 'package:instagram_clone_flutter_firebase/utils/colors.dart';
 import 'package:instagram_clone_flutter_firebase/utils/global_variables.dart';
 import 'package:provider/provider.dart';
@@ -18,6 +19,8 @@ class _WebScreenLayoutState extends State<WebScreenLayout> {
   late PageController pageController;
 
   void navigationTapped(int page) {
+    AudioManager.instance.pauseAudio();
+    homeTabIndexNotifier.value = page;
     pageController.jumpToPage(page);
     setState(() {
       _page = page;
@@ -25,6 +28,8 @@ class _WebScreenLayoutState extends State<WebScreenLayout> {
   }
 
   void onPageChanged(int page) {
+    AudioManager.instance.pauseAudio();
+    homeTabIndexNotifier.value = page;
     setState(() {
       _page = page;
     });
@@ -34,6 +39,7 @@ class _WebScreenLayoutState extends State<WebScreenLayout> {
   void initState() {
     super.initState();
     pageController = PageController();
+    homeTabIndexNotifier.value = _page;
   }
 
   @override

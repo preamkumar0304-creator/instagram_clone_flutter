@@ -6,16 +6,21 @@ class TextFieldInput extends StatelessWidget {
   final bool isPass;
   final String labelText;
   final TextInputType textInputType;
+  final bool? obscureText;
+  final Widget? suffixIcon;
   const TextFieldInput({
     super.key,
     required this.labelText,
     this.isPass = false,
     required this.textEditingController,
     required this.textInputType,
+    this.obscureText,
+    this.suffixIcon,
   });
 
   @override
   Widget build(BuildContext context) {
+    final shouldObscure = obscureText ?? isPass;
     final eBorder = OutlineInputBorder(
       borderSide: BorderSide(color: secondaryColor, width: 1.5),
       borderRadius: BorderRadius.circular(12),
@@ -28,14 +33,22 @@ class TextFieldInput extends StatelessWidget {
       controller: textEditingController,
       decoration: InputDecoration(
         labelText: labelText,
-        labelStyle: TextStyle(color: primaryColor,fontSize:16,),
+        labelStyle: const TextStyle(
+          color: primaryColor,
+          fontSize: 16,
+        ),
         enabledBorder: eBorder,
         focusedBorder: fBorder,
         filled: true,
         fillColor: mobileBackgroundColor,
+        suffixIcon: suffixIcon,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: 14,
+        ),
       ),
       keyboardType: textInputType,
-      obscureText: isPass,
+      obscureText: shouldObscure,
     );
   }
 }

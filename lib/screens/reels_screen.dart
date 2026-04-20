@@ -7,6 +7,7 @@ import 'package:video_player/video_player.dart';
 import 'package:visibility_detector/visibility_detector.dart';
 import 'package:instagram_clone_flutter_firebase/screens/add_post_screen.dart';
 import 'package:instagram_clone_flutter_firebase/screens/profile_screen.dart';
+import 'package:instagram_clone_flutter_firebase/utils/global_variables.dart';
 
 class ReelsScreen extends StatefulWidget {
   const ReelsScreen({super.key});
@@ -19,9 +20,11 @@ class _ReelsScreenState extends State<ReelsScreen>
     with AutomaticKeepAliveClientMixin, WidgetsBindingObserver {
   final PageController _pageController = PageController();
   int _currentIndex = 0;
+  int _reelsCount = 0;
   static const double _fastSwipeVelocity = 1800;
   final ValueNotifier<bool> _isMuted = ValueNotifier<bool>(false);
   final ValueNotifier<bool> _isScreenVisible = ValueNotifier<bool>(true);
+  late final VoidCallback _homeTabListener;
 
   String _safeString(dynamic value) {
     if (value == null) return "";
@@ -43,10 +46,28 @@ class _ReelsScreenState extends State<ReelsScreen>
     return false;
   }
 
+  void _syncActiveIndexDuringScroll() {
+    if (!_pageController.hasClients || _reelsCount <= 0) return;
+    final rawPage = _pageController.page;
+    if (rawPage == null) return;
+    final nextIndex = rawPage.round().clamp(0, _reelsCount - 1).toInt();
+    if (nextIndex == _currentIndex) return;
+    if (!mounted) return;
+    setState(() {
+      _currentIndex = nextIndex;
+    });
+  }
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _pageController.addListener(_syncActiveIndexDuringScroll);
+    _homeTabListener = () {
+      _isScreenVisible.value = homeTabIndexNotifier.value == 2;
+    };
+    homeTabIndexNotifier.addListener(_homeTabListener);
+    _isScreenVisible.value = homeTabIndexNotifier.value == 2;
   }
 
   @override
@@ -58,13 +79,15 @@ class _ReelsScreenState extends State<ReelsScreen>
       return;
     }
     if (state == AppLifecycleState.resumed) {
-      _isScreenVisible.value = true;
+      _isScreenVisible.value = homeTabIndexNotifier.value == 2;
     }
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _pageController.removeListener(_syncActiveIndexDuringScroll);
+    homeTabIndexNotifier.removeListener(_homeTabListener);
     _pageController.dispose();
     _isMuted.dispose();
     _isScreenVisible.dispose();
@@ -101,6 +124,7 @@ class _ReelsScreenState extends State<ReelsScreen>
                     );
                   }
                   final docs = snapshot.data?.docs ?? [];
+                  _reelsCount = docs.length;
                   if (docs.isEmpty) {
                     return const Center(
                       child: Text(
@@ -118,7 +142,7 @@ class _ReelsScreenState extends State<ReelsScreen>
                       controller: _pageController,
                       scrollDirection: Axis.vertical,
                       physics: const PageScrollPhysics(),
-                      allowImplicitScrolling: true,
+                      allowImplicitScrolling: false,
                       onPageChanged: (index) {
                         setState(() {
                           _currentIndex = index;
@@ -208,6 +232,7 @@ class _ReelPageState extends State<_ReelPage> {
   VideoPlayerController? _controller;
   bool _isReady = false;
   bool _hasError = false;
+  bool _isPageVisible = false;
   String _activeUrl = "";
   bool _isMuted = false;
   late final VoidCallback _muteListener;
@@ -221,6 +246,7 @@ class _ReelPageState extends State<_ReelPage> {
   @override
   void initState() {
     super.initState();
+    _isPageVisible = widget.isActive;
     _isMuted = widget.mutedListenable.value;
     _muteListener = () {
       if (!mounted) return;
@@ -230,14 +256,7 @@ class _ReelPageState extends State<_ReelPage> {
       _applyVolume();
     };
     _visibilityListener = () {
-      if (!mounted) return;
-      if (widget.screenVisibleListenable.value) {
-        if (widget.isActive) {
-          _controller?.play();
-        }
-      } else {
-        _controller?.pause();
-      }
+      _syncPlaybackState();
     };
     widget.mutedListenable.addListener(_muteListener);
     widget.screenVisibleListenable.addListener(_visibilityListener);
@@ -255,11 +274,7 @@ class _ReelPageState extends State<_ReelPage> {
       _initController();
       return;
     }
-    if (widget.screenVisibleListenable.value && widget.isActive) {
-      _controller?.play();
-    } else {
-      _controller?.pause();
-    }
+    _syncPlaybackState();
   }
 
   Future<void> _initController() async {
@@ -276,9 +291,7 @@ class _ReelPageState extends State<_ReelPage> {
       setState(() {
         _isReady = true;
       });
-      if (widget.isActive && widget.screenVisibleListenable.value) {
-        await controller.play();
-      }
+      _syncPlaybackState();
     } catch (_) {
       if (!mounted) return;
       setState(() {
@@ -291,6 +304,21 @@ class _ReelPageState extends State<_ReelPage> {
     final controller = _controller;
     if (controller == null) return;
     controller.setVolume(_isMuted ? 0.0 : 1.0);
+  }
+
+  void _syncPlaybackState() {
+    final controller = _controller;
+    if (controller == null) return;
+    final shouldPlay =
+        widget.screenVisibleListenable.value &&
+        widget.isActive &&
+        _isPageVisible &&
+        _isReady;
+    if (shouldPlay) {
+      controller.play();
+      return;
+    }
+    controller.pause();
   }
 
   void _disposeController() {
@@ -326,146 +354,157 @@ class _ReelPageState extends State<_ReelPage> {
             ? thumbnailUrl
             : (coverUrl.isNotEmpty ? coverUrl : "");
 
-    return Stack(
-      children: [
-        Positioned.fill(
-          child:
-              _isReady && _controller != null
-                  ? FittedBox(
-                    fit: BoxFit.cover,
-                    clipBehavior: Clip.hardEdge,
-                    child: SizedBox(
-                      width: _controller!.value.size.width,
-                      height: _controller!.value.size.height,
-                      child: VideoPlayer(_controller!),
-                    ),
-                  )
-                  : Container(
-                    color: Colors.black,
-                    alignment: Alignment.center,
-                    child:
-                        _hasError
-                            ? const Icon(
-                              Icons.broken_image_outlined,
-                              color: Colors.white,
-                              size: 48,
-                            )
-                            : fallbackImage.isNotEmpty
-                                ? CachedNetworkImage(
-                                  imageUrl: fallbackImage,
-                                  fit: BoxFit.cover,
-                                  placeholder:
-                                      (_, __) => const CircularProgressIndicator(
-                                        color: Colors.white,
-                                      ),
-                                  errorWidget: (_, __, ___) => const Icon(
-                                    Icons.broken_image_outlined,
-                                    color: Colors.white,
-                                    size: 48,
-                                  ),
-                                )
-                                : const CircularProgressIndicator(
-                                  color: Colors.white,
-                                ),
-                  ),
-        ),
-        Positioned(
-          left: 16,
-          right: 90,
-          bottom: 24,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              GestureDetector(
-                onTap: () {
-                  if (ownerUid.isEmpty) return;
-                  Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => ProfileScreen(uid: ownerUid)),
-                  );
-                },
-                child: Row(
-                  children: [
-                    CircleAvatar(
-                      radius: 16,
-                      backgroundImage:
-                          ownerPhotoUrl.isNotEmpty
-                              ? NetworkImage(ownerPhotoUrl)
-                              : null,
-                      backgroundColor: Colors.white24,
-                      child:
-                          ownerPhotoUrl.isEmpty
-                              ? const Icon(
-                                Icons.person,
-                                color: Colors.white,
-                                size: 18,
-                              )
-                              : null,
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      username.isNotEmpty ? "@$username" : "Creator",
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w600,
+    final visibilityKey =
+        reelId.isNotEmpty ? "reel-$reelId" : "reel-${reelUrl.hashCode}";
+    return VisibilityDetector(
+      key: ValueKey(visibilityKey),
+      onVisibilityChanged: (info) {
+        final nowVisible = info.visibleFraction > 0.8;
+        if (_isPageVisible == nowVisible) return;
+        _isPageVisible = nowVisible;
+        _syncPlaybackState();
+      },
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child:
+                _isReady && _controller != null
+                    ? FittedBox(
+                      fit: BoxFit.cover,
+                      clipBehavior: Clip.hardEdge,
+                      child: SizedBox(
+                        width: _controller!.value.size.width,
+                        height: _controller!.value.size.height,
+                        child: VideoPlayer(_controller!),
                       ),
+                    )
+                    : Container(
+                      color: Colors.black,
+                      alignment: Alignment.center,
+                      child:
+                          _hasError
+                              ? const Icon(
+                                Icons.broken_image_outlined,
+                                color: Colors.white,
+                                size: 48,
+                              )
+                              : fallbackImage.isNotEmpty
+                                  ? CachedNetworkImage(
+                                    imageUrl: fallbackImage,
+                                    fit: BoxFit.cover,
+                                    placeholder:
+                                        (_, __) => const CircularProgressIndicator(
+                                          color: Colors.white,
+                                        ),
+                                    errorWidget: (_, __, ___) => const Icon(
+                                      Icons.broken_image_outlined,
+                                      color: Colors.white,
+                                      size: 48,
+                                    ),
+                                  )
+                                  : const CircularProgressIndicator(
+                                    color: Colors.white,
+                                  ),
                     ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                title.isNotEmpty ? title : "Reel",
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ],
           ),
-        ),
-        Positioned(
-          right: 8,
-          bottom: 24,
-          child: Column(
-            children: [
-              IconButton(
-                icon: Icon(
-                  _isMuted ? Icons.volume_off : Icons.volume_up,
-                  color: Colors.white,
-                ),
-                onPressed: () {
-                  widget.mutedListenable.value = !_isMuted;
-                },
-              ),
-              const SizedBox(height: 8),
-              IconButton(
-                icon: const Icon(Icons.send_outlined, color: Colors.white),
-                onPressed: () {
-                  showModalBottomSheet(
-                    context: context,
-                    isScrollControlled: true,
-                    useSafeArea: true,
-                    backgroundColor: Colors.transparent,
-                    builder:
-                        (context) => ShareReelSheet(
-                          reelId: reelId,
-                          reelUrl: reelUrl,
-                          reelOwnerUid: ownerUid,
-                          reelOwnerUsername: username,
-                          reelOwnerPhotoUrl: ownerPhotoUrl,
-                          reelCoverUrl: coverUrl,
-                          reelThumbnailUrl: thumbnailUrl,
+          Positioned(
+            left: 16,
+            right: 90,
+            bottom: 24,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                GestureDetector(
+                  onTap: () {
+                    if (ownerUid.isEmpty) return;
+                    Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => ProfileScreen(uid: ownerUid)),
+                    );
+                  },
+                  child: Row(
+                    children: [
+                      CircleAvatar(
+                        radius: 16,
+                        backgroundImage:
+                            ownerPhotoUrl.isNotEmpty
+                                ? NetworkImage(ownerPhotoUrl)
+                                : null,
+                        backgroundColor: Colors.white24,
+                        child:
+                            ownerPhotoUrl.isEmpty
+                                ? const Icon(
+                                  Icons.person,
+                                  color: Colors.white,
+                                  size: 18,
+                                )
+                                : null,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        username.isNotEmpty ? "@$username" : "Creator",
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
                         ),
-                  );
-                },
-              ),
-            ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  title.isNotEmpty ? title : "Reel",
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
-      ],
+          Positioned(
+            right: 8,
+            bottom: 24,
+            child: Column(
+              children: [
+                IconButton(
+                  icon: Icon(
+                    _isMuted ? Icons.volume_off : Icons.volume_up,
+                    color: Colors.white,
+                  ),
+                  onPressed: () {
+                    widget.mutedListenable.value = !_isMuted;
+                  },
+                ),
+                const SizedBox(height: 8),
+                IconButton(
+                  icon: const Icon(Icons.send_outlined, color: Colors.white),
+                  onPressed: () {
+                    showModalBottomSheet(
+                      context: context,
+                      isScrollControlled: true,
+                      useSafeArea: true,
+                      backgroundColor: Colors.transparent,
+                      builder:
+                          (context) => ShareReelSheet(
+                            reelId: reelId,
+                            reelUrl: reelUrl,
+                            reelOwnerUid: ownerUid,
+                            reelOwnerUsername: username,
+                            reelOwnerPhotoUrl: ownerPhotoUrl,
+                            reelCoverUrl: coverUrl,
+                            reelThumbnailUrl: thumbnailUrl,
+                          ),
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

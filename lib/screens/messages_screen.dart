@@ -19,6 +19,8 @@ class MessagesScreen extends StatefulWidget {
 
 class _MessagesScreenState extends State<MessagesScreen>
     with AutomaticKeepAliveClientMixin {
+  Future<List<Map<String, dynamic>>>? _contactsFuture;
+  String _contactsSignature = "";
 
   List<String> _safeStringList(dynamic value) {
     if (value is List) {
@@ -49,6 +51,7 @@ class _MessagesScreenState extends State<MessagesScreen>
         usersById[doc.id] = doc.data();
       }
     }
+
     final results = <Map<String, dynamic>>[];
     for (final id in ids) {
       final data = usersById[id];
@@ -60,9 +63,11 @@ class _MessagesScreenState extends State<MessagesScreen>
         "name": _safeString(data["name"]),
         "username": _safeString(data["username"]),
         "photoUrl": _safeString(data["photoUrl"]),
+        "lastMessage": last,
         "lastTime": lastTime,
       });
     }
+
     results.sort((a, b) {
       final aTime = a["lastTime"] as DateTime? ?? DateTime(1970);
       final bTime = b["lastTime"] as DateTime? ?? DateTime(1970);
@@ -114,28 +119,20 @@ class _MessagesScreenState extends State<MessagesScreen>
     return DateTime.fromMillisecondsSinceEpoch(0);
   }
 
-  Future<List<Map<String, dynamic>>> _loadUsersWithLastMessage(
-    String currentUid,
-    List<Map<String, dynamic>> users,
-  ) async {
-    final results = <Map<String, dynamic>>[];
-    for (final user in users) {
-      final uid = _safeString(user["uid"]);
-      if (uid.isEmpty) continue;
-      final msg = await _loadLastMessage(currentUid, uid);
-      final time = _extractMessageTime(msg);
-      results.add({
-        ...user,
-        "lastMessage": msg,
-        "lastTime": time,
-      });
-    }
-    results.sort((a, b) {
-      final aTime = a["lastTime"] as DateTime? ?? DateTime(1970);
-      final bTime = b["lastTime"] as DateTime? ?? DateTime(1970);
-      return bTime.compareTo(aTime);
-    });
-    return results;
+  String _messagePreview(Map<String, dynamic>? msg) {
+    if (msg == null) return "Tap to chat";
+    final type = _safeString(msg["type"]);
+    final imageUrl = _safeString(msg["imageUrl"]);
+    final videoUrl = _safeString(msg["videoUrl"]);
+    final audioUrl = _safeString(msg["audioUrl"]);
+    if (type == "share_post") return "Shared a post";
+    if (type == "share_reel") return "Shared a reel";
+    if (type == "share_profile") return "Shared a profile";
+    if (videoUrl.isNotEmpty || type == "video") return "Video";
+    if (audioUrl.isNotEmpty || type == "audio") return "Voice message";
+    if (imageUrl.isNotEmpty || type == "image") return "Photo";
+    final text = _safeString(msg["text"]);
+    return text.isEmpty ? "Tap to chat" : text;
   }
 
   Future<void> _sendCameraMessage({
@@ -178,7 +175,10 @@ class _MessagesScreenState extends State<MessagesScreen>
         message: "Photo",
       );
       if (mounted) {
-        setState(() {});
+        setState(() {
+          _contactsFuture = null;
+          _contactsSignature = "";
+        });
       }
       if (context.mounted) {
         showSnackBar(
@@ -341,10 +341,15 @@ class _MessagesScreenState extends State<MessagesScreen>
         child: CircularProgressIndicator(color: primaryColor),
       );
     }
+
     return Scaffold(
       backgroundColor: mobileBackgroundColor,
       appBar: AppBar(
         backgroundColor: mobileBackgroundColor,
+        surfaceTintColor: mobileBackgroundColor,
+        scrolledUnderElevation: 0,
+        elevation: 0,
+        titleSpacing: 16,
         title: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
           stream:
               FirebaseFirestore.instance
@@ -358,12 +363,12 @@ class _MessagesScreenState extends State<MessagesScreen>
               username.isNotEmpty ? username : "Messages",
               style: const TextStyle(
                 color: primaryColor,
+                fontSize: 20,
                 fontWeight: FontWeight.w600,
               ),
             );
           },
         ),
-        centerTitle: true,
         actions: [
           IconButton(
             icon: const Icon(Icons.edit_square, color: primaryColor),
@@ -392,232 +397,165 @@ class _MessagesScreenState extends State<MessagesScreen>
           final all =
               {...followers, ...following}
                   .where((id) => !blocked.contains(id))
-                  .toList();
+                  .toList()
+                ..sort();
           final requestCount =
               followers.where((id) => !following.contains(id)).length;
-          if (all.isEmpty) {
-            return const Center(
-              child: Text(
-                "No contacts yet.",
-                style: TextStyle(color: primaryColor),
-              ),
-            );
+
+          final contactSignature = "${currentUid}_${all.join(",")}";
+          if (_contactsFuture == null || _contactsSignature != contactSignature) {
+            _contactsSignature = contactSignature;
+            _contactsFuture = _loadUsers(all, currentUid);
           }
+
           return FutureBuilder<List<Map<String, dynamic>>>(
-            future: _loadUsers(all, currentUid),
+            future: _contactsFuture,
             builder: (context, usersSnap) {
-              if (usersSnap.connectionState == ConnectionState.waiting) {
+              if (usersSnap.connectionState == ConnectionState.waiting &&
+                  usersSnap.data == null) {
                 return const Center(
                   child: CircularProgressIndicator(color: primaryColor),
                 );
               }
+
               final users = usersSnap.data ?? [];
-              if (users.isEmpty) {
-                return const Center(
-                  child: Text(
-                    "No contacts yet.",
-                    style: TextStyle(color: primaryColor),
+              return RefreshIndicator(
+                onRefresh: () async {
+                  final refreshed = await _loadUsers(all, currentUid);
+                  if (!mounted) return;
+                  setState(() {
+                    _contactsFuture = Future.value(refreshed);
+                    _contactsSignature = contactSignature;
+                  });
+                },
+                child: ListView.separated(
+                  physics: const AlwaysScrollableScrollPhysics(
+                    parent: BouncingScrollPhysics(),
                   ),
-                );
-              }
-              return Column(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                    child: Row(
-                      children: [
-                        const Text(
-                          "Messages",
-                          style: TextStyle(
-                            color: primaryColor,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        const Spacer(),
-                        InkWell(
-                          onTap: () {
-                            Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) => const MessageRequestsScreen(),
-                              ),
-                            );
-                          },
-                          child: Text(
-                            requestCount > 0
-                                ? "Requests ($requestCount)"
-                                : "Requests",
-                            style: const TextStyle(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                  itemCount: users.isEmpty ? 2 : users.length + 1,
+                  separatorBuilder: (_, index) {
+                    if (index == 0) return const SizedBox(height: 12);
+                    return const SizedBox(height: 8);
+                  },
+                  itemBuilder: (context, index) {
+                    if (index == 0) {
+                      return Row(
+                        children: [
+                          const Text(
+                            "Messages",
+                            style: TextStyle(
                               color: primaryColor,
+                              fontSize: 18,
                               fontWeight: FontWeight.w600,
                             ),
                           ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Expanded(
-                    child: ListView.separated(
-                      itemCount: users.length,
-                      separatorBuilder: (_, __) =>
-                          const Divider(color: secondaryColor, height: 1),
-                      itemBuilder: (context, index) {
-                        final user = users[index];
-                        final uid = _safeString(user["uid"]);
-                        final name = _safeString(user["name"]);
-                        final username = _safeString(user["username"]);
-                        final photoUrl = _safeString(user["photoUrl"]);
-                        final isMuted = muted.contains(uid);
-                        final isBlocked = blocked.contains(uid);
-
-                        return FutureBuilder<Map<String, dynamic>?>(
-                          future: _loadLastMessage(currentUid, uid),
-                          builder: (context, msgSnap) {
-                            final msg = msgSnap.data;
-                            final type =
-                                msg == null ? "" : _safeString(msg["type"]);
-                            final imageUrl =
-                                msg == null ? "" : _safeString(msg["imageUrl"]);
-                            final videoUrl =
-                                msg == null ? "" : _safeString(msg["videoUrl"]);
-                            final audioUrl =
-                                msg == null ? "" : _safeString(msg["audioUrl"]);
-                            final text = msg == null
-                                ? "Tap to chat"
-                                : (type == "share_post"
-                                    ? "Shared a post"
-                                    : type == "share_reel"
-                                        ? "Shared a reel"
-                                    : type == "share_profile"
-                                        ? "Shared a profile"
-                                        : videoUrl.isNotEmpty ||
-                                                type == "video"
-                                            ? "Video"
-                                            : audioUrl.isNotEmpty ||
-                                                    type == "audio"
-                                                ? "Voice message"
-                                                : imageUrl.isNotEmpty ||
-                                                        type == "image"
-                                                    ? "Photo"
-                                                    : _safeString(
-                                                      msg["text"],
-                                                    ));
-                            final createdAt = _extractMessageTime(msg);
-                            final timeLabel =
-                                msg == null ? "" : _formatRelativeTime(createdAt);
-                            final fromUid =
-                                msg == null ? "" : _safeString(msg["fromUid"]);
-                            final showUnreadDot =
-                                msg != null && fromUid.isNotEmpty &&
-                                fromUid != currentUid;
-
-                            return ListTile(
-                              leading: GestureDetector(
-                                onLongPress: () {
-                                  _showProfileOptions(
-                                    context: context,
-                                    currentUid: currentUid,
-                                    otherUid: uid,
-                                    username: username,
-                                    name: name,
-                                    photoUrl: photoUrl,
-                                    isMuted: isMuted,
-                                    isBlocked: isBlocked,
-                                  );
-                                },
-                                child: CircleAvatar(
-                                  backgroundImage:
-                                      photoUrl.isNotEmpty
-                                          ? NetworkImage(photoUrl)
-                                          : null,
-                                  backgroundColor: Colors.grey.shade300,
-                                  child:
-                                      photoUrl.isEmpty
-                                          ? const Icon(
-                                            Icons.person,
-                                            color: Colors.black,
-                                          )
-                                          : null,
+                          const Spacer(),
+                          InkWell(
+                            borderRadius: BorderRadius.circular(999),
+                            onTap: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => const MessageRequestsScreen(),
                                 ),
+                              );
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 8,
                               ),
-                              title: Text(
-                                username.isNotEmpty ? username : "User",
+                              decoration: BoxDecoration(
+                                color: Colors.black.withOpacity(0.05),
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              child: Text(
+                                requestCount > 0
+                                    ? "Requests ($requestCount)"
+                                    : "Requests",
                                 style: const TextStyle(
                                   color: primaryColor,
-                                  fontWeight: FontWeight.w400,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
                                 ),
                               ),
-                              subtitle: Text(
-                                timeLabel.isEmpty
-                                    ? text
-                                    : "$text · $timeLabel",
-                                style: const TextStyle(
-                                  color: secondaryColor,
-                                  fontWeight: FontWeight.w400,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              trailing: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  if (showUnreadDot)
-                                    Container(
-                                      width: 8,
-                                      height: 8,
-                                      margin: const EdgeInsets.only(right: 10),
-                                      decoration: BoxDecoration(
-                                        color: Colors.black,
-                                        borderRadius: BorderRadius.circular(999),
-                                      ),
-                                    ),
-                                  IconButton(
-                                    icon: const Icon(
-                                      Icons.camera_alt_outlined,
-                                      color: primaryColor,
-                                    ),
-                                    onPressed: () {
-                                      _sendCameraMessage(
-                                        context: context,
-                                        currentUid: currentUid,
-                                        otherUid: uid,
-                                      );
-                                    },
-                                  ),
-                                ],
-                              ),
-                              onTap: () {
-                                Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                    builder:
-                                        (_) => ChatScreen(
-                                          currentUid: currentUid,
-                                          otherUid: uid,
-                                          otherUsername: username,
-                                          otherPhotoUrl: photoUrl,
-                                        ),
-                                  ),
-                                );
-                              },
-                              onLongPress: () {
-                                _showProfileOptions(
-                                  context: context,
+                            ),
+                          ),
+                        ],
+                      );
+                    }
+
+                    if (users.isEmpty) {
+                      return const Padding(
+                        padding: EdgeInsets.only(top: 72),
+                        child: Center(
+                          child: Text(
+                            "No contacts yet.",
+                            style: TextStyle(
+                              color: secondaryColor,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                      );
+                    }
+
+                    final user = users[index - 1];
+                    final uid = _safeString(user["uid"]);
+                    final name = _safeString(user["name"]);
+                    final username = _safeString(user["username"]);
+                    final photoUrl = _safeString(user["photoUrl"]);
+                    final isMuted = muted.contains(uid);
+                    final isBlocked = blocked.contains(uid);
+                    final msg = user["lastMessage"] as Map<String, dynamic>?;
+                    final fromUid = msg == null ? "" : _safeString(msg["fromUid"]);
+                    final showUnreadDot =
+                        msg != null && fromUid.isNotEmpty && fromUid != currentUid;
+                    final timeLabel =
+                        msg == null ? "" : _formatRelativeTime(_extractMessageTime(msg));
+                    final preview = _messagePreview(msg);
+
+                    return _MessageThreadTile(
+                      username: username.isNotEmpty ? username : "User",
+                      lastMessage: preview,
+                      timeLabel: timeLabel,
+                      photoUrl: photoUrl,
+                      showUnreadDot: showUnreadDot,
+                      onTap: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder:
+                                (_) => ChatScreen(
                                   currentUid: currentUid,
                                   otherUid: uid,
-                                  username: username,
-                                  name: name,
-                                  photoUrl: photoUrl,
-                                  isMuted: isMuted,
-                                  isBlocked: isBlocked,
-                                );
-                              },
-                            );
-                          },
+                                  otherUsername: username,
+                                  otherPhotoUrl: photoUrl,
+                                ),
+                          ),
                         );
                       },
-                    ),
-                  ),
-                ],
+                      onLongPress: () {
+                        _showProfileOptions(
+                          context: context,
+                          currentUid: currentUid,
+                          otherUid: uid,
+                          username: username,
+                          name: name,
+                          photoUrl: photoUrl,
+                          isMuted: isMuted,
+                          isBlocked: isBlocked,
+                        );
+                      },
+                      onCameraTap: () {
+                        _sendCameraMessage(
+                          context: context,
+                          currentUid: currentUid,
+                          otherUid: uid,
+                        );
+                      },
+                    );
+                  },
+                ),
               );
             },
           );
@@ -628,4 +566,130 @@ class _MessagesScreenState extends State<MessagesScreen>
 
   @override
   bool get wantKeepAlive => true;
+}
+
+class _MessageThreadTile extends StatelessWidget {
+  final String username;
+  final String lastMessage;
+  final String timeLabel;
+  final String photoUrl;
+  final bool showUnreadDot;
+  final VoidCallback onTap;
+  final VoidCallback onLongPress;
+  final VoidCallback onCameraTap;
+
+  const _MessageThreadTile({
+    required this.username,
+    required this.lastMessage,
+    required this.timeLabel,
+    required this.photoUrl,
+    required this.showUnreadDot,
+    required this.onTap,
+    required this.onLongPress,
+    required this.onCameraTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white,
+      elevation: 0.6,
+      shadowColor: Colors.black.withOpacity(0.08),
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        onLongPress: onLongPress,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          child: Row(
+            children: [
+              CircleAvatar(
+                radius: 24,
+                backgroundImage: photoUrl.isNotEmpty ? NetworkImage(photoUrl) : null,
+                backgroundColor: Colors.grey.shade200,
+                child:
+                    photoUrl.isEmpty
+                        ? const Icon(Icons.person, color: primaryColor)
+                        : null,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      username,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: primaryColor,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      lastMessage,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: secondaryColor,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w400,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  if (timeLabel.isNotEmpty)
+                    Text(
+                      timeLabel,
+                      style: const TextStyle(
+                        color: secondaryColor,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  const SizedBox(height: 8),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (showUnreadDot)
+                        Container(
+                          width: 8,
+                          height: 8,
+                          margin: const EdgeInsets.only(right: 8),
+                          decoration: BoxDecoration(
+                            color: Colors.black,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                        ),
+                      InkWell(
+                        borderRadius: BorderRadius.circular(999),
+                        onTap: onCameraTap,
+                        child: const Padding(
+                          padding: EdgeInsets.all(2),
+                          child: Icon(
+                            Icons.camera_alt_outlined,
+                            color: primaryColor,
+                            size: 20,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
