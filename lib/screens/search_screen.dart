@@ -22,6 +22,7 @@ class _SearchScreenState extends State<SearchScreen>
   final TextEditingController searchController = TextEditingController();
   bool isShowUsers = false;
   Future<List<Map<String, dynamic>>>? _mediaFuture;
+  int _selectedTrendIndex = 0;
 
   String _safeString(dynamic value) {
     if (value == null) return "";
@@ -50,7 +51,8 @@ class _SearchScreenState extends State<SearchScreen>
           (userData["following"] as List?)?.whereType<String>().toList() ?? [];
       allowedUids.addAll(following);
       final blocked =
-          (userData["blockedUsers"] as List?)?.whereType<String>().toList() ?? [];
+          (userData["blockedUsers"] as List?)?.whereType<String>().toList() ??
+          [];
       blockedUids.addAll(blocked);
     }
 
@@ -189,6 +191,7 @@ class _SearchScreenState extends State<SearchScreen>
       ),
     );
   }
+
   @override
   void initState() {
     super.initState();
@@ -218,17 +221,30 @@ class _SearchScreenState extends State<SearchScreen>
       backgroundColor: mobileBackgroundColor,
       appBar: AppBar(
         backgroundColor: mobileBackgroundColor,
+        elevation: 0,
+        scrolledUnderElevation: 0,
         title: const Text(
           "Search",
-          style: TextStyle(color: primaryColor, fontWeight: FontWeight.w600),
+          style: TextStyle(
+            color: primaryColor,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.2,
+          ),
         ),
         bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(64),
+          preferredSize: const Size.fromHeight(70),
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
             child: TextFormField(
               style: const TextStyle(color: primaryColor),
               controller: searchController,
+              onChanged: (value) {
+                if (value.trim().isEmpty && isShowUsers) {
+                  setState(() {
+                    isShowUsers = false;
+                  });
+                }
+              },
               decoration: InputDecoration(
                 suffixIcon: GestureDetector(
                   onTap: () {
@@ -237,7 +253,7 @@ class _SearchScreenState extends State<SearchScreen>
                       isShowUsers = false;
                     });
                   },
-                  child: const Icon(Icons.close, color: secondaryColor),
+                  child: const Icon(Icons.close_rounded, color: secondaryColor),
                 ),
                 contentPadding: const EdgeInsets.symmetric(
                   horizontal: 14,
@@ -246,16 +262,19 @@ class _SearchScreenState extends State<SearchScreen>
                 filled: true,
                 fillColor: mobileSearchColor,
                 enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide: BorderSide(color: Colors.grey.shade300),
+                  borderRadius: BorderRadius.circular(16),
+                  borderSide: BorderSide(color: Colors.grey.shade300, width: 1),
                 ),
                 focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
+                  borderRadius: BorderRadius.circular(16),
                   borderSide: const BorderSide(color: primaryColor, width: 1.5),
                 ),
                 hintText: "Search people, reels, posts",
                 hintStyle: const TextStyle(color: secondaryColor),
-                prefixIcon: const Icon(Icons.search, color: secondaryColor),
+                prefixIcon: const Icon(
+                  Icons.search_rounded,
+                  color: secondaryColor,
+                ),
               ),
               onFieldSubmitted: (value) {
                 setState(() {
@@ -266,243 +285,353 @@ class _SearchScreenState extends State<SearchScreen>
           ),
         ),
       ),
-      body:
-          isShowUsers
-              ? FutureBuilder(
-                future: _searchUsers(searchController.text),
-                builder: (context, snapshot) {
-                  if (!snapshot.hasData) {
-                    return const Center(
-                      child: CircularProgressIndicator(color: primaryColor),
-                    );
-                  } else {
-                    final docs = snapshot.data ?? [];
-                    if (docs.isEmpty) {
+      body: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 220),
+        switchInCurve: Curves.easeOut,
+        switchOutCurve: Curves.easeIn,
+        child:
+            isShowUsers
+                ? FutureBuilder(
+                  key: const ValueKey("search_users"),
+                  future: _searchUsers(searchController.text),
+                  builder: (context, snapshot) {
+                    if (!snapshot.hasData) {
+                      return const Center(
+                        child: CircularProgressIndicator(color: primaryColor),
+                      );
+                    } else {
+                      final docs = snapshot.data ?? [];
+                      if (docs.isEmpty) {
+                        return const Center(
+                          child: Text(
+                            "No users found.",
+                            style: TextStyle(color: primaryColor),
+                          ),
+                        );
+                      }
+                      return ListView.separated(
+                        padding: const EdgeInsets.fromLTRB(12, 10, 12, 14),
+                        itemCount: docs.length,
+                        separatorBuilder: (_, __) => const SizedBox(height: 8),
+                        itemBuilder: (context, index) {
+                          final doc = docs[index];
+                          final data =
+                              (doc.data() as Map<String, dynamic>?) ?? {};
+                          final username = _safeString(data["username"]);
+                          final photoUrl = _safeString(data["photoUrl"]);
+
+                          return InkWell(
+                            borderRadius: BorderRadius.circular(14),
+                            onTap:
+                                () => Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder:
+                                        (context) => ProfileScreen(
+                                          uid: _safeString(data["uid"]),
+                                        ),
+                                  ),
+                                ),
+                            child: Ink(
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(color: Colors.black12),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.04),
+                                    blurRadius: 10,
+                                    offset: const Offset(0, 4),
+                                  ),
+                                ],
+                              ),
+                              child: ListTile(
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 4,
+                                ),
+                                leading: Container(
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: Colors.black12,
+                                      width: 1,
+                                    ),
+                                  ),
+                                  child: CircleAvatar(
+                                    backgroundImage:
+                                        photoUrl.isNotEmpty
+                                            ? NetworkImage(photoUrl)
+                                            : null,
+                                    child:
+                                        photoUrl.isEmpty
+                                            ? const Icon(
+                                              Icons.person_outline_rounded,
+                                              color: Colors.white,
+                                            )
+                                            : null,
+                                  ),
+                                ),
+                                title: Text(
+                                  username,
+                                  style: const TextStyle(
+                                    color: primaryColor,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                subtitle: Text(
+                                  "@$username",
+                                  style: const TextStyle(color: secondaryColor),
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      );
+                    }
+                  },
+                )
+                : FutureBuilder(
+                  key: const ValueKey("search_media"),
+                  future: _mediaFuture,
+                  builder: (context, snapshot) {
+                    if (!snapshot.hasData) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    final media = snapshot.data ?? [];
+                    if (media.isEmpty) {
                       return const Center(
                         child: Text(
-                          "No users found.",
+                          "No posts or reels yet.",
                           style: TextStyle(color: primaryColor),
                         ),
                       );
                     }
-                    return ListView.builder(
-                      itemCount: docs.length,
-                      itemBuilder: (context, index) {
-                        final doc = docs[index];
-                        final data =
-                            (doc.data() as Map<String, dynamic>?) ?? {};
-                        final username = _safeString(data["username"]);
-                        final photoUrl = _safeString(data["photoUrl"]);
-
-                        return InkWell(
-                          onTap:
-                              () => Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder:
-                                      (context) => ProfileScreen(
-                                        uid:
-                                            _safeString(data["uid"]),
+                    return Column(
+                      children: [
+                        SizedBox(
+                          height: 44,
+                          child: ListView.separated(
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            scrollDirection: Axis.horizontal,
+                            itemBuilder: (context, index) {
+                              final tag = trendTags[index];
+                              final isActive = _selectedTrendIndex == index;
+                              return AnimatedContainer(
+                                duration: const Duration(milliseconds: 180),
+                                curve: Curves.easeOut,
+                                child: Material(
+                                  color: Colors.transparent,
+                                  child: InkWell(
+                                    borderRadius: BorderRadius.circular(20),
+                                    onTap: () {
+                                      setState(() {
+                                        _selectedTrendIndex = index;
+                                      });
+                                    },
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 14,
+                                        vertical: 10,
                                       ),
-                                ),
-                              ),
-                          child: ListTile(
-                            leading: Container(
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                  color: secondaryColor,
-                                  width: 1,
-                                ),
-                              ),
-                              child: CircleAvatar(
-                                backgroundImage:
-                                    photoUrl.isNotEmpty
-                                        ? NetworkImage(photoUrl)
-                                        : null,
-                                child:
-                                    photoUrl.isEmpty
-                                        ? const Icon(
-                                          Icons.person,
-                                          color: Colors.white,
-                                        )
-                                        : null,
-                              ),
-                            ),
-                            title: Text(
-                              username,
-                              style: const TextStyle(color: primaryColor),
-                            ),
-                            subtitle: Text(
-                              "@$username",
-                              style: const TextStyle(color: secondaryColor),
-                            ),
-                          ),
-                        );
-                      },
-                    );
-                  }
-                },
-              )
-              : FutureBuilder(
-                future: _mediaFuture,
-                builder: (context, snapshot) {
-                  if (!snapshot.hasData) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
-                  final media = snapshot.data ?? [];
-                  if (media.isEmpty) {
-                    return const Center(
-                      child: Text(
-                        "No posts or reels yet.",
-                        style: TextStyle(color: primaryColor),
-                      ),
-                    );
-                  }
-                  return Column(
-                    children: [
-                      SizedBox(
-                        height: 44,
-                        child: ListView.separated(
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                          scrollDirection: Axis.horizontal,
-                          itemBuilder: (context, index) {
-                            final tag = trendTags[index];
-                            return Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 14,
-                                vertical: 10,
-                              ),
-                              decoration: BoxDecoration(
-                                color: mobileSearchColor,
-                                borderRadius: BorderRadius.circular(20),
-                                border: Border.all(
-                                  color: Colors.grey.shade300,
-                                ),
-                              ),
-                              child: Text(
-                                tag,
-                                style: const TextStyle(color: primaryColor),
-                              ),
-                            );
-                          },
-                          separatorBuilder: (_, __) => const SizedBox(width: 8),
-                          itemCount: trendTags.length,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      Expanded(
-                        child: MasonryGridView.builder(
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                          mainAxisSpacing: 10,
-                          crossAxisSpacing: 10,
-                          gridDelegate:
-                              SliverSimpleGridDelegateWithFixedCrossAxisCount(
-                                crossAxisCount: 2,
-                              ),
-                          itemCount: media.length,
-                          itemBuilder: (context, index) {
-                            final item = media[index];
-                            final type = _safeString(item["type"]);
-                            final isReel = type == "reel";
-                            final data =
-                                item["data"] is Map<String, dynamic>
-                                    ? item["data"] as Map<String, dynamic>
-                                    : <String, dynamic>{};
-                            final postUrl = _safeString(data["postUrl"]);
-                            final thumbnailUrl = _safeString(data["thumbnailUrl"]);
-                            final reelUrl = _safeString(data["reelUrl"]);
-                            final profilePhoto = _safeString(data["photoUrl"]);
-                            final rawCoverUrl = _safeString(data["coverUrl"]);
-                            final coverUrl =
-                                rawCoverUrl.isNotEmpty &&
-                                        rawCoverUrl != profilePhoto
-                                    ? rawCoverUrl
-                                    : "";
-                            final fallbackUrl =
-                                postUrl.isNotEmpty ? postUrl : profilePhoto;
-                            final previewUrl =
-                                isReel
-                                    ? (thumbnailUrl.isNotEmpty
-                                        ? thumbnailUrl
-                                        : (coverUrl.isNotEmpty ? coverUrl : ""))
-                                    : (postUrl.isNotEmpty
-                                        ? postUrl
-                                        : fallbackUrl);
-
-                            return GestureDetector(
-                              onTap: () {
-                                Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                    builder:
-                                        (_) => SearchMediaViewerScreen(
-                                          items: media,
-                                          initialIndex: index,
+                                      child: Text(
+                                        tag,
+                                        style: TextStyle(
+                                          color:
+                                              isActive
+                                                  ? Colors.white
+                                                  : primaryColor,
+                                          fontWeight: FontWeight.w500,
                                         ),
-                                  ),
-                                );
-                              },
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(16),
-                                child: Stack(
-                                  children: [
-                                    AspectRatio(
-                                      aspectRatio: 1,
-                                      child:
-                                          isReel
-                                              ? _ReelSearchThumb(
-                                                thumbnailUrl: previewUrl,
-                                                reelUrl: reelUrl,
-                                                fallback: _mediaFallback(
-                                                  isReel: isReel,
-                                                ),
-                                              )
-                                              : (previewUrl.isNotEmpty
-                                                  ? CachedNetworkImage(
-                                                    imageUrl: previewUrl,
-                                                    fit: BoxFit.cover,
-                                                    placeholder:
-                                                        (_, __) => _mediaFallback(
-                                                          isReel: isReel,
-                                                        ),
-                                                    errorWidget:
-                                                        (_, __, ___) => _mediaFallback(
-                                                          isReel: isReel,
-                                                        ),
-                                                  )
-                                                  : _mediaFallback(isReel: isReel)),
+                                      ),
                                     ),
-                                    if (isReel)
-                                      Positioned(
-                                        top: 8,
-                                        right: 8,
-                                        child: Container(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 8,
-                                            vertical: 4,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            color: Colors.white70,
-                                            borderRadius:
-                                                BorderRadius.circular(10),
-                                          ),
-                                          child: const Icon(
-                                            Icons.play_arrow,
-                                            color: Colors.black,
-                                            size: 18,
-                                          ),
-                                        ),
-                                      ),
-                                  ],
+                                  ),
                                 ),
-                              ),
-                            );
-                          },
+                                decoration: BoxDecoration(
+                                  color: isActive ? primaryColor : mobileSearchColor,
+                                  borderRadius: BorderRadius.circular(20),
+                                  border: Border.all(
+                                    color:
+                                        isActive
+                                            ? primaryColor
+                                            : Colors.grey.shade300,
+                                  ),
+                                  boxShadow:
+                                      isActive
+                                          ? [
+                                            BoxShadow(
+                                              color: Colors.black.withOpacity(
+                                                0.1,
+                                              ),
+                                              blurRadius: 10,
+                                              offset: const Offset(0, 4),
+                                            ),
+                                          ]
+                                          : null,
+                                ),
+                              );
+                            },
+                            separatorBuilder:
+                                (_, __) => const SizedBox(width: 8),
+                            itemCount: trendTags.length,
+                          ),
                         ),
-                      ),
-                    ],
-                  );
-                },
-              ),
+                        const SizedBox(height: 12),
+                        Expanded(
+                          child: MasonryGridView.builder(
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                            mainAxisSpacing: 10,
+                            crossAxisSpacing: 10,
+                            gridDelegate:
+                                SliverSimpleGridDelegateWithFixedCrossAxisCount(
+                                  crossAxisCount: 2,
+                                ),
+                            itemCount: media.length,
+                            itemBuilder: (context, index) {
+                              final item = media[index];
+                              final type = _safeString(item["type"]);
+                              final isReel = type == "reel";
+                              final data =
+                                  item["data"] is Map<String, dynamic>
+                                      ? item["data"] as Map<String, dynamic>
+                                      : <String, dynamic>{};
+                              final postUrl = _safeString(data["postUrl"]);
+                              final thumbnailUrl = _safeString(
+                                data["thumbnailUrl"],
+                              );
+                              final reelUrl = _safeString(data["reelUrl"]);
+                              final profilePhoto = _safeString(
+                                data["photoUrl"],
+                              );
+                              final rawCoverUrl = _safeString(data["coverUrl"]);
+                              final coverUrl =
+                                  rawCoverUrl.isNotEmpty &&
+                                          rawCoverUrl != profilePhoto
+                                      ? rawCoverUrl
+                                      : "";
+                              final fallbackUrl =
+                                  postUrl.isNotEmpty ? postUrl : profilePhoto;
+                              final previewUrl =
+                                  isReel
+                                      ? (thumbnailUrl.isNotEmpty
+                                          ? thumbnailUrl
+                                          : (coverUrl.isNotEmpty
+                                              ? coverUrl
+                                              : ""))
+                                      : (postUrl.isNotEmpty
+                                          ? postUrl
+                                          : fallbackUrl);
+
+                              return TweenAnimationBuilder<double>(
+                                tween: Tween(begin: 0.94, end: 1),
+                                duration: Duration(
+                                  milliseconds: 220 + ((index % 8) * 20),
+                                ),
+                                curve: Curves.easeOutCubic,
+                                builder: (context, value, child) {
+                                  return Opacity(
+                                    opacity: value.clamp(0, 1),
+                                    child: Transform.scale(
+                                      scale: value,
+                                      child: child,
+                                    ),
+                                  );
+                                },
+                                child: GestureDetector(
+                                  onTap: () {
+                                    Navigator.of(context).push(
+                                      MaterialPageRoute(
+                                        builder:
+                                            (_) => SearchMediaViewerScreen(
+                                              items: media,
+                                              initialIndex: index,
+                                            ),
+                                      ),
+                                    );
+                                  },
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(16),
+                                      border: Border.all(color: Colors.black12),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withOpacity(0.05),
+                                          blurRadius: 10,
+                                          offset: const Offset(0, 4),
+                                        ),
+                                      ],
+                                    ),
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(16),
+                                      child: Stack(
+                                        children: [
+                                          AspectRatio(
+                                            aspectRatio: 1,
+                                            child:
+                                                isReel
+                                                    ? _ReelSearchThumb(
+                                                      thumbnailUrl: previewUrl,
+                                                      reelUrl: reelUrl,
+                                                      fallback: _mediaFallback(
+                                                        isReel: isReel,
+                                                      ),
+                                                    )
+                                                    : (previewUrl.isNotEmpty
+                                                        ? CachedNetworkImage(
+                                                          imageUrl: previewUrl,
+                                                          fit: BoxFit.cover,
+                                                          placeholder:
+                                                              (_, __) =>
+                                                                  _mediaFallback(
+                                                                    isReel:
+                                                                        isReel,
+                                                                  ),
+                                                          errorWidget:
+                                                              (_, __, ___) =>
+                                                                  _mediaFallback(
+                                                                    isReel:
+                                                                        isReel,
+                                                                  ),
+                                                        )
+                                                        : _mediaFallback(
+                                                          isReel: isReel,
+                                                        )),
+                                          ),
+                                          if (isReel)
+                                            Positioned(
+                                              top: 8,
+                                              right: 8,
+                                              child: Container(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                      horizontal: 8,
+                                                      vertical: 4,
+                                                    ),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.white70,
+                                                  borderRadius:
+                                                      BorderRadius.circular(10),
+                                                ),
+                                                child: const Icon(
+                                                  Icons.play_arrow_rounded,
+                                                  color: Colors.black,
+                                                  size: 18,
+                                                ),
+                                              ),
+                                            ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
+      ),
     );
   }
 
@@ -582,11 +711,7 @@ class _ReelSearchThumbState extends State<_ReelSearchThumb> {
         if (bytes == null || bytes.isEmpty) {
           return widget.fallback;
         }
-        return Image.memory(
-          bytes,
-          fit: BoxFit.cover,
-          gaplessPlayback: true,
-        );
+        return Image.memory(bytes, fit: BoxFit.cover, gaplessPlayback: true);
       },
     );
   }

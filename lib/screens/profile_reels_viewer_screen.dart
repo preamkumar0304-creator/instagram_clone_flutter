@@ -21,6 +21,7 @@ class ProfileReelsViewerScreen extends StatefulWidget {
 class _ProfileReelsViewerScreenState extends State<ProfileReelsViewerScreen> {
   late final PageController _pageController;
   int _currentIndex = 0;
+  final ValueNotifier<bool> _isScrollSettled = ValueNotifier<bool>(true);
 
   @override
   void initState() {
@@ -32,6 +33,7 @@ class _ProfileReelsViewerScreenState extends State<ProfileReelsViewerScreen> {
   @override
   void dispose() {
     _pageController.dispose();
+    _isScrollSettled.dispose();
     super.dispose();
   }
 
@@ -42,21 +44,45 @@ class _ProfileReelsViewerScreenState extends State<ProfileReelsViewerScreen> {
       body: SafeArea(
         child: Stack(
           children: [
-            PageView.builder(
-              controller: _pageController,
-              scrollDirection: Axis.vertical,
-              itemCount: widget.reels.length,
-              onPageChanged: (index) {
-                setState(() {
-                  _currentIndex = index;
-                });
+            NotificationListener<ScrollNotification>(
+              onNotification: (notification) {
+                // Keep playback locked to one settled page to avoid audio overlap.
+                if (notification is ScrollStartNotification) {
+                  _isScrollSettled.value = false;
+                } else if (notification is ScrollEndNotification) {
+                  _isScrollSettled.value = true;
+                  final page = _pageController.page;
+                  if (page != null) {
+                    final nextIndex = page.round();
+                    if (nextIndex != _currentIndex &&
+                        nextIndex >= 0 &&
+                        nextIndex < widget.reels.length) {
+                      setState(() {
+                        _currentIndex = nextIndex;
+                      });
+                    }
+                  }
+                }
+                return false;
               },
-              itemBuilder: (context, index) {
-                return _ProfileReelPage(
-                  data: widget.reels[index],
-                  isActive: index == _currentIndex,
-                );
-              },
+              child: PageView.builder(
+                controller: _pageController,
+                scrollDirection: Axis.vertical,
+                itemCount: widget.reels.length,
+                onPageChanged: (index) {
+                  setState(() {
+                    _currentIndex = index;
+                  });
+                },
+                itemBuilder: (context, index) {
+                  return _ProfileReelPage(
+                    data: widget.reels[index],
+                    isActive: index == _currentIndex,
+                    shouldPrepare: (index - _currentIndex).abs() <= 1,
+                    scrollSettledListenable: _isScrollSettled,
+                  );
+                },
+              ),
             ),
             Positioned(
               top: 8,
@@ -76,8 +102,15 @@ class _ProfileReelsViewerScreenState extends State<ProfileReelsViewerScreen> {
 class _ProfileReelPage extends StatefulWidget {
   final Map<String, dynamic> data;
   final bool isActive;
+  final bool shouldPrepare;
+  final ValueNotifier<bool> scrollSettledListenable;
 
-  const _ProfileReelPage({required this.data, required this.isActive});
+  const _ProfileReelPage({
+    required this.data,
+    required this.isActive,
+    required this.shouldPrepare,
+    required this.scrollSettledListenable,
+  });
 
   @override
   State<_ProfileReelPage> createState() => _ProfileReelPageState();
@@ -87,7 +120,9 @@ class _ProfileReelPageState extends State<_ProfileReelPage> {
   VideoPlayerController? _controller;
   bool _isReady = false;
   bool _hasError = false;
+  bool _isLoading = false;
   String _activeUrl = "";
+  int _loadVersion = 0;
 
   String _safeString(dynamic value) {
     if (value == null) return "";
@@ -97,48 +132,96 @@ class _ProfileReelPageState extends State<_ProfileReelPage> {
   @override
   void initState() {
     super.initState();
-    _initController();
+    widget.scrollSettledListenable.addListener(_syncPlaybackState);
+    _syncPreparedState();
   }
 
   @override
   void didUpdateWidget(covariant _ProfileReelPage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    final url = _safeString(widget.data["reelUrl"]);
-    if (url != _activeUrl) {
-      _disposeController();
-      _isReady = false;
-      _hasError = false;
-      _initController();
+    if (oldWidget.data != widget.data ||
+        oldWidget.shouldPrepare != widget.shouldPrepare) {
+      _syncPreparedState(force: true);
       return;
     }
-    if (widget.isActive) {
-      _controller?.play();
-    } else {
-      _controller?.pause();
+    if (oldWidget.isActive != widget.isActive) {
+      _syncPlaybackState();
     }
   }
 
-  Future<void> _initController() async {
+  void _syncPreparedState({bool force = false}) {
     final url = _safeString(widget.data["reelUrl"]);
-    if (url.isEmpty) return;
+    if (!widget.shouldPrepare || url.isEmpty) {
+      _loadVersion++;
+      _disposeController();
+      if (_isReady || _hasError) {
+        setState(() {
+          _isReady = false;
+          _hasError = false;
+          _isLoading = false;
+          _activeUrl = url;
+        });
+      } else {
+        _activeUrl = url;
+      }
+      return;
+    }
+    if (!force && _controller != null && _activeUrl == url) {
+      _syncPlaybackState();
+      return;
+    }
+    _initController(url);
+  }
+
+  Future<void> _initController(String url) async {
+    final currentVersion = ++_loadVersion;
+    _disposeController();
+    if (mounted) {
+      setState(() {
+        _isReady = false;
+        _hasError = false;
+        _isLoading = true;
+      });
+    } else {
+      _isReady = false;
+      _hasError = false;
+      _isLoading = true;
+    }
     _activeUrl = url;
     try {
       final controller = VideoPlayerController.networkUrl(Uri.parse(url));
-      _controller = controller;
       await controller.initialize();
+      if (!mounted || currentVersion != _loadVersion) {
+        await controller.dispose();
+        return;
+      }
+      _controller = controller;
       await controller.setLooping(true);
-      if (!mounted) return;
       setState(() {
         _isReady = true;
+        _isLoading = false;
       });
-      if (widget.isActive) {
-        await controller.play();
-      }
+      _syncPlaybackState();
     } catch (_) {
       if (!mounted) return;
       setState(() {
         _hasError = true;
+        _isLoading = false;
       });
+    }
+  }
+
+  void _syncPlaybackState() {
+    final controller = _controller;
+    if (controller == null) return;
+    if (widget.scrollSettledListenable.value && widget.isActive && _isReady) {
+      if (!controller.value.isPlaying) {
+        controller.play();
+      }
+      return;
+    }
+    if (controller.value.isPlaying) {
+      controller.pause();
     }
   }
 
@@ -150,6 +233,7 @@ class _ProfileReelPageState extends State<_ProfileReelPage> {
 
   @override
   void dispose() {
+    widget.scrollSettledListenable.removeListener(_syncPlaybackState);
     _disposeController();
     super.dispose();
   }
@@ -195,24 +279,31 @@ class _ProfileReelPageState extends State<_ProfileReelPage> {
                               size: 48,
                             )
                             : fallbackImage.isNotEmpty
-                                ? CachedNetworkImage(
-                                  imageUrl: fallbackImage,
-                                  fit: BoxFit.cover,
-                                  placeholder:
-                                      (_, __) => const CircularProgressIndicator(
-                                        color: Colors.white,
-                                      ),
-                                  errorWidget: (_, __, ___) => const Icon(
+                            ? CachedNetworkImage(
+                              imageUrl: fallbackImage,
+                              fit: BoxFit.cover,
+                              placeholder:
+                                  (_, __) => const CircularProgressIndicator(
+                                    color: Colors.white,
+                                  ),
+                              errorWidget:
+                                  (_, __, ___) => const Icon(
                                     Icons.broken_image_outlined,
                                     color: Colors.white,
                                     size: 48,
                                   ),
-                                )
-                                : const CircularProgressIndicator(
-                                  color: Colors.white,
-                                ),
+                            )
+                            : const CircularProgressIndicator(
+                              color: Colors.white,
+                            ),
                   ),
         ),
+        if (_isLoading)
+          const Positioned.fill(
+            child: Center(
+              child: CircularProgressIndicator(color: Colors.white),
+            ),
+          ),
         Positioned(
           left: 16,
           right: 16,

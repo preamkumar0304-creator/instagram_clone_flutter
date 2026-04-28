@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:instagram_clone_flutter_firebase/utils/colors.dart';
 import 'package:instagram_clone_flutter_firebase/widgets/share_reel_sheet.dart';
@@ -20,10 +21,9 @@ class _ReelsScreenState extends State<ReelsScreen>
     with AutomaticKeepAliveClientMixin, WidgetsBindingObserver {
   final PageController _pageController = PageController();
   int _currentIndex = 0;
-  int _reelsCount = 0;
-  static const double _fastSwipeVelocity = 1800;
   final ValueNotifier<bool> _isMuted = ValueNotifier<bool>(false);
   final ValueNotifier<bool> _isScreenVisible = ValueNotifier<bool>(true);
+  final ValueNotifier<bool> _isScrollSettled = ValueNotifier<bool>(true);
   late final VoidCallback _homeTabListener;
 
   String _safeString(dynamic value) {
@@ -31,30 +31,80 @@ class _ReelsScreenState extends State<ReelsScreen>
     return value.toString();
   }
 
-  bool _handleFastSwipe(ScrollEndNotification notification, int maxIndex) {
-    final details = notification.dragDetails;
-    if (details == null) return false;
-    final velocity = details.primaryVelocity ?? 0;
-    if (velocity.abs() < _fastSwipeVelocity) return false;
-    final target = velocity < 0 ? _currentIndex + 1 : _currentIndex - 1;
-    if (target < 0 || target > maxIndex) return false;
-    _pageController.animateToPage(
-      target,
-      duration: const Duration(milliseconds: 180),
-      curve: Curves.easeOut,
-    );
-    return false;
+  Set<String> _safeStringSet(dynamic value) {
+    if (value is List) {
+      return value.whereType<String>().toSet();
+    }
+    return <String>{};
   }
 
-  void _syncActiveIndexDuringScroll() {
-    if (!_pageController.hasClients || _reelsCount <= 0) return;
-    final rawPage = _pageController.page;
-    if (rawPage == null) return;
-    final nextIndex = rawPage.round().clamp(0, _reelsCount - 1).toInt();
-    if (nextIndex == _currentIndex) return;
-    if (!mounted) return;
-    setState(() {
-      _currentIndex = nextIndex;
+  String _normalizeReelUrl(String url) {
+    final raw = url.trim();
+    if (raw.isEmpty) return "";
+    final parsed = Uri.tryParse(raw);
+    if (parsed == null) return raw;
+    // Ignore token/query differences so the same media URL is not repeated.
+    final host = parsed.host.toLowerCase();
+    final path = parsed.path.toLowerCase();
+    return "$host$path";
+  }
+
+  List<QueryDocumentSnapshot<Map<String, dynamic>>> _dedupeReels(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+  ) {
+    final seenKeys = <String>{};
+    final seenUrls = <String>{};
+    final unique = <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+    for (final doc in docs) {
+      final data = doc.data();
+      final reelId =
+          _safeString(data["reelId"]).isNotEmpty
+              ? _safeString(data["reelId"])
+              : doc.id;
+      final reelUrl = _safeString(data["reelUrl"]);
+      if (reelUrl.isEmpty) continue;
+      final normalizedUrl = _normalizeReelUrl(reelUrl);
+      if (normalizedUrl.isNotEmpty && !seenUrls.add(normalizedUrl)) {
+        continue;
+      }
+      final key = "$reelId|$normalizedUrl";
+      if (!seenKeys.add(key)) continue;
+      unique.add(doc);
+    }
+    return unique;
+  }
+
+  List<QueryDocumentSnapshot<Map<String, dynamic>>> _buildReelsFeed({
+    required List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+    required String currentUid,
+    required Set<String> followingUids,
+    required Set<String> blockedUids,
+  }) {
+    final visible = docs
+        .where((doc) {
+          final ownerUid = _safeString(doc.data()["uid"]);
+          if (ownerUid.isEmpty) return false;
+          return !blockedUids.contains(ownerUid);
+        })
+        .toList(growable: false);
+
+    final allowed = <String>{...followingUids, currentUid};
+    final followingOnly = visible
+        .where((doc) => allowed.contains(_safeString(doc.data()["uid"])))
+        .toList(growable: false);
+
+    // Keep fallback feed ready when following users have no reels.
+    return followingOnly.isNotEmpty ? followingOnly : visible;
+  }
+
+  void _clampCurrentIndex(int length) {
+    if (length <= 0 || _currentIndex < length) return;
+    final nextIndex = length - 1;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      setState(() {
+        _currentIndex = nextIndex;
+      });
     });
   }
 
@@ -62,7 +112,6 @@ class _ReelsScreenState extends State<ReelsScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _pageController.addListener(_syncActiveIndexDuringScroll);
     _homeTabListener = () {
       _isScreenVisible.value = homeTabIndexNotifier.value == 2;
     };
@@ -86,17 +135,18 @@ class _ReelsScreenState extends State<ReelsScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _pageController.removeListener(_syncActiveIndexDuringScroll);
     homeTabIndexNotifier.removeListener(_homeTabListener);
     _pageController.dispose();
     _isMuted.dispose();
     _isScreenVisible.dispose();
+    _isScrollSettled.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     super.build(context);
+    final currentUid = FirebaseAuth.instance.currentUser?.uid ?? "";
     return Scaffold(
       backgroundColor: Colors.black,
       body: VisibilityDetector(
@@ -106,93 +156,189 @@ class _ReelsScreenState extends State<ReelsScreen>
         },
         child: Stack(
           children: [
-            NotificationListener<OverscrollIndicatorNotification>(
-              onNotification: (overscroll) {
-                overscroll.disallowIndicator();
-                return false;
-              },
-              child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                stream:
-                    FirebaseFirestore.instance
-                        .collection("reels")
-                        .orderBy("createdAt", descending: true)
-                        .snapshots(),
-                builder: (context, snapshot) {
-                  if (snapshot.connectionState == ConnectionState.waiting) {
-                    return const Center(
-                      child: CircularProgressIndicator(color: primaryColor),
-                    );
-                  }
-                  final docs = snapshot.data?.docs ?? [];
-                  _reelsCount = docs.length;
-                  if (docs.isEmpty) {
-                    return const Center(
-                      child: Text(
-                        "No reels yet.",
-                        style: TextStyle(color: Colors.white),
-                      ),
-                    );
-                  }
-                  final maxIndex = docs.length - 1;
-                  return NotificationListener<ScrollEndNotification>(
-                    onNotification: (notification) {
-                      return _handleFastSwipe(notification, maxIndex);
-                    },
-                    child: PageView.builder(
-                      controller: _pageController,
-                      scrollDirection: Axis.vertical,
-                      physics: const PageScrollPhysics(),
-                      allowImplicitScrolling: false,
-                      onPageChanged: (index) {
-                        setState(() {
-                          _currentIndex = index;
-                        });
-                      },
-                      itemCount: docs.length,
-                      itemBuilder: (context, index) {
-                        return _ReelPage(
-                          key: ValueKey(docs[index].id),
-                          data: docs[index].data(),
-                          isActive: index == _currentIndex,
-                          mutedListenable: _isMuted,
-                          screenVisibleListenable: _isScreenVisible,
+            StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+              stream:
+                  currentUid.isEmpty
+                      ? null
+                      : FirebaseFirestore.instance
+                          .collection("users")
+                          .doc(currentUid)
+                          .snapshots(),
+              builder: (context, userSnap) {
+                final userData =
+                    userSnap.data?.data() ?? const <String, dynamic>{};
+                final followingUids = _safeStringSet(userData["following"]);
+                final blockedUids = _safeStringSet(userData["blockedUsers"]);
+                return NotificationListener<OverscrollIndicatorNotification>(
+                  onNotification: (overscroll) {
+                    overscroll.disallowIndicator();
+                    return false;
+                  },
+                  child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                    stream:
+                        FirebaseFirestore.instance
+                            .collection("reels")
+                            .orderBy("createdAt", descending: true)
+                            .limit(200)
+                            .snapshots(),
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState == ConnectionState.waiting &&
+                          snapshot.data == null) {
+                        return const Center(
+                          child: CircularProgressIndicator(color: primaryColor),
                         );
-                      },
+                      }
+                      final rawDocs = snapshot.data?.docs ?? [];
+                      final dedupedDocs = _dedupeReels(rawDocs);
+                      final feedDocs = _buildReelsFeed(
+                        docs: dedupedDocs,
+                        currentUid: currentUid,
+                        followingUids: followingUids,
+                        blockedUids: blockedUids,
+                      );
+                      _clampCurrentIndex(feedDocs.length);
+                      if (feedDocs.isEmpty) {
+                        return const Center(
+                          child: Text(
+                            "No reels yet.",
+                            style: TextStyle(color: Colors.white),
+                          ),
+                        );
+                      }
+                      return NotificationListener<ScrollNotification>(
+                        onNotification: (notification) {
+                          // Pause all reels while the page is in transition;
+                          // resume only when scroll settles on one full-screen item.
+                          if (notification is ScrollStartNotification) {
+                            _isScrollSettled.value = false;
+                          } else if (notification is ScrollEndNotification) {
+                            _isScrollSettled.value = true;
+                            final page = _pageController.page;
+                            if (page != null) {
+                              final nextIndex = page.round();
+                              if (nextIndex != _currentIndex &&
+                                  nextIndex >= 0 &&
+                                  nextIndex < feedDocs.length) {
+                                setState(() {
+                                  _currentIndex = nextIndex;
+                                });
+                              }
+                            }
+                          }
+                          return false;
+                        },
+                        child: PageView.builder(
+                          controller: _pageController,
+                          scrollDirection: Axis.vertical,
+                          pageSnapping: true,
+                          physics: const PageScrollPhysics(
+                            parent: BouncingScrollPhysics(),
+                          ),
+                          allowImplicitScrolling: true,
+                          onPageChanged: (index) {
+                            if (_currentIndex == index) return;
+                            setState(() {
+                              _currentIndex = index;
+                            });
+                          },
+                          itemCount: feedDocs.length,
+                          itemBuilder: (context, index) {
+                            return _ReelPage(
+                              key: ValueKey(feedDocs[index].id),
+                              data: feedDocs[index].data(),
+                              isActive: index == _currentIndex,
+                              shouldPrepare: (index - _currentIndex).abs() <= 1,
+                              mutedListenable: _isMuted,
+                              screenVisibleListenable: _isScreenVisible,
+                              scrollSettledListenable: _isScrollSettled,
+                            );
+                          },
+                        ),
+                      );
+                    },
+                  ),
+                );
+              },
+            ),
+            // Soft overlays keep text/icons readable while preserving full-screen video.
+            Positioned.fill(
+              child: IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.black.withOpacity(0.35),
+                        Colors.transparent,
+                        Colors.transparent,
+                        Colors.black.withOpacity(0.6),
+                      ],
+                      stops: const [0, 0.18, 0.55, 1],
                     ),
-                  );
-                },
+                  ),
+                ),
               ),
             ),
             SafeArea(
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
                 child: Row(
                   children: [
-                    IconButton(
-                      onPressed: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(builder: (_) => const AddPostScreen()),
-                        );
-                      },
-                      icon: const Icon(Icons.add, color: Colors.white, size: 28),
+                    Container(
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.45),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: Colors.white24),
+                      ),
+                      child: IconButton(
+                        onPressed: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder:
+                                  (_) => const AddPostScreen(
+                                    initialCreateType: "reel",
+                                  ),
+                            ),
+                          );
+                        },
+                        icon: const Icon(
+                          Icons.add_circle_outline_rounded,
+                          color: Colors.white,
+                          size: 24,
+                        ),
+                      ),
                     ),
                     const Spacer(),
-                    Row(
-                      children: const [
-                        Text(
-                          "Reels",
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 20,
-                            fontWeight: FontWeight.w600,
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.45),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: Colors.white24),
+                      ),
+                      child: const Row(
+                        children: [
+                          Text(
+                            "Reels",
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 0.2,
+                            ),
                           ),
-                        ),
-                        SizedBox(width: 4),
-                        Icon(
-                          Icons.keyboard_arrow_down,
-                          color: Colors.white,
-                        ),
-                      ],
+                          SizedBox(width: 4),
+                          Icon(
+                            Icons.keyboard_arrow_down_rounded,
+                            color: Colors.white,
+                            size: 20,
+                          ),
+                        ],
+                      ),
                     ),
                     const Spacer(),
                     const SizedBox(width: 40),
@@ -213,15 +359,19 @@ class _ReelsScreenState extends State<ReelsScreen>
 class _ReelPage extends StatefulWidget {
   final Map<String, dynamic> data;
   final bool isActive;
+  final bool shouldPrepare;
   final ValueNotifier<bool> mutedListenable;
   final ValueNotifier<bool> screenVisibleListenable;
+  final ValueNotifier<bool> scrollSettledListenable;
 
   const _ReelPage({
     super.key,
     required this.data,
     required this.isActive,
+    required this.shouldPrepare,
     required this.mutedListenable,
     required this.screenVisibleListenable,
+    required this.scrollSettledListenable,
   });
 
   @override
@@ -232,9 +382,10 @@ class _ReelPageState extends State<_ReelPage> {
   VideoPlayerController? _controller;
   bool _isReady = false;
   bool _hasError = false;
-  bool _isPageVisible = false;
+  bool _isLoading = false;
   String _activeUrl = "";
   bool _isMuted = false;
+  int _loadVersion = 0;
   late final VoidCallback _muteListener;
   late final VoidCallback _visibilityListener;
 
@@ -246,7 +397,6 @@ class _ReelPageState extends State<_ReelPage> {
   @override
   void initState() {
     super.initState();
-    _isPageVisible = widget.isActive;
     _isMuted = widget.mutedListenable.value;
     _muteListener = () {
       if (!mounted) return;
@@ -260,42 +410,83 @@ class _ReelPageState extends State<_ReelPage> {
     };
     widget.mutedListenable.addListener(_muteListener);
     widget.screenVisibleListenable.addListener(_visibilityListener);
-    _initController();
+    widget.scrollSettledListenable.addListener(_visibilityListener);
+    _syncPreparedState();
   }
 
   @override
   void didUpdateWidget(covariant _ReelPage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    final url = _safeString(widget.data["reelUrl"]);
-    if (url != _activeUrl) {
-      _disposeController();
-      _isReady = false;
-      _hasError = false;
-      _initController();
+    if (oldWidget.data != widget.data ||
+        oldWidget.shouldPrepare != widget.shouldPrepare) {
+      _syncPreparedState(force: true);
       return;
     }
-    _syncPlaybackState();
+    if (oldWidget.isActive != widget.isActive) {
+      _syncPlaybackState();
+    }
   }
 
-  Future<void> _initController() async {
+  void _syncPreparedState({bool force = false}) {
     final url = _safeString(widget.data["reelUrl"]);
-    if (url.isEmpty) return;
+    if (!widget.shouldPrepare || url.isEmpty) {
+      _loadVersion++;
+      _disposeController();
+      if (_isReady || _hasError) {
+        setState(() {
+          _isReady = false;
+          _hasError = false;
+          _isLoading = false;
+          _activeUrl = url;
+        });
+      } else {
+        _activeUrl = url;
+      }
+      return;
+    }
+    if (!force && _controller != null && _activeUrl == url) {
+      _syncPlaybackState();
+      return;
+    }
+    _initController(url);
+  }
+
+  Future<void> _initController(String url) async {
+    final currentVersion = ++_loadVersion;
+    _disposeController();
+    if (mounted) {
+      setState(() {
+        _isReady = false;
+        _hasError = false;
+        _isLoading = true;
+      });
+    } else {
+      _isReady = false;
+      _hasError = false;
+      _isLoading = true;
+    }
+
     _activeUrl = url;
     try {
       final controller = VideoPlayerController.networkUrl(Uri.parse(url));
-      _controller = controller;
       await controller.initialize();
+      if (!mounted || currentVersion != _loadVersion) {
+        await controller.dispose();
+        return;
+      }
+      _controller = controller;
       await controller.setLooping(true);
       await controller.setVolume(_isMuted ? 0.0 : 1.0);
-      if (!mounted) return;
       setState(() {
         _isReady = true;
+        _isLoading = false;
       });
       _syncPlaybackState();
     } catch (_) {
       if (!mounted) return;
       setState(() {
         _hasError = true;
+        _isLoading = false;
       });
     }
   }
@@ -311,14 +502,18 @@ class _ReelPageState extends State<_ReelPage> {
     if (controller == null) return;
     final shouldPlay =
         widget.screenVisibleListenable.value &&
+        widget.scrollSettledListenable.value &&
         widget.isActive &&
-        _isPageVisible &&
         _isReady;
     if (shouldPlay) {
-      controller.play();
+      if (!controller.value.isPlaying) {
+        controller.play();
+      }
       return;
     }
-    controller.pause();
+    if (controller.value.isPlaying) {
+      controller.pause();
+    }
   }
 
   void _disposeController() {
@@ -331,6 +526,7 @@ class _ReelPageState extends State<_ReelPage> {
   void dispose() {
     widget.mutedListenable.removeListener(_muteListener);
     widget.screenVisibleListenable.removeListener(_visibilityListener);
+    widget.scrollSettledListenable.removeListener(_visibilityListener);
     _disposeController();
     super.dispose();
   }
@@ -356,14 +552,8 @@ class _ReelPageState extends State<_ReelPage> {
 
     final visibilityKey =
         reelId.isNotEmpty ? "reel-$reelId" : "reel-${reelUrl.hashCode}";
-    return VisibilityDetector(
+    return RepaintBoundary(
       key: ValueKey(visibilityKey),
-      onVisibilityChanged: (info) {
-        final nowVisible = info.visibleFraction > 0.8;
-        if (_isPageVisible == nowVisible) return;
-        _isPageVisible = nowVisible;
-        _syncPlaybackState();
-      },
       child: Stack(
         children: [
           Positioned.fill(
@@ -389,27 +579,34 @@ class _ReelPageState extends State<_ReelPage> {
                                 size: 48,
                               )
                               : fallbackImage.isNotEmpty
-                                  ? CachedNetworkImage(
-                                    imageUrl: fallbackImage,
-                                    fit: BoxFit.cover,
-                                    placeholder:
-                                        (_, __) => const CircularProgressIndicator(
-                                          color: Colors.white,
-                                        ),
-                                    errorWidget: (_, __, ___) => const Icon(
+                              ? CachedNetworkImage(
+                                imageUrl: fallbackImage,
+                                fit: BoxFit.cover,
+                                placeholder:
+                                    (_, __) => const CircularProgressIndicator(
+                                      color: Colors.white,
+                                    ),
+                                errorWidget:
+                                    (_, __, ___) => const Icon(
                                       Icons.broken_image_outlined,
                                       color: Colors.white,
                                       size: 48,
                                     ),
-                                  )
-                                  : const CircularProgressIndicator(
-                                    color: Colors.white,
-                                  ),
+                              )
+                              : const CircularProgressIndicator(
+                                color: Colors.white,
+                              ),
                     ),
           ),
+          if (_isLoading)
+            const Positioned.fill(
+              child: Center(
+                child: CircularProgressIndicator(color: Colors.white),
+              ),
+            ),
           Positioned(
             left: 16,
-            right: 90,
+            right: 96,
             bottom: 24,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -418,13 +615,15 @@ class _ReelPageState extends State<_ReelPage> {
                   onTap: () {
                     if (ownerUid.isEmpty) return;
                     Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => ProfileScreen(uid: ownerUid)),
+                      MaterialPageRoute(
+                        builder: (_) => ProfileScreen(uid: ownerUid),
+                      ),
                     );
                   },
                   child: Row(
                     children: [
                       CircleAvatar(
-                        radius: 16,
+                        radius: 17,
                         backgroundImage:
                             ownerPhotoUrl.isNotEmpty
                                 ? NetworkImage(ownerPhotoUrl)
@@ -433,24 +632,30 @@ class _ReelPageState extends State<_ReelPage> {
                         child:
                             ownerPhotoUrl.isEmpty
                                 ? const Icon(
-                                  Icons.person,
+                                  Icons.person_outline_rounded,
                                   color: Colors.white,
                                   size: 18,
                                 )
                                 : null,
                       ),
-                      const SizedBox(width: 8),
-                      Text(
-                        username.isNotEmpty ? "@$username" : "Creator",
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w600,
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          username.isNotEmpty ? "@$username" : "Creator",
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 15,
+                            letterSpacing: 0.2,
+                          ),
                         ),
                       ),
                     ],
                   ),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 10),
                 Text(
                   title.isNotEmpty ? title : "Reel",
                   maxLines: 2,
@@ -459,29 +664,30 @@ class _ReelPageState extends State<_ReelPage> {
                     color: Colors.white,
                     fontSize: 15,
                     fontWeight: FontWeight.w500,
+                    height: 1.25,
                   ),
                 ),
               ],
             ),
           ),
           Positioned(
-            right: 8,
+            right: 10,
             bottom: 24,
             child: Column(
               children: [
-                IconButton(
-                  icon: Icon(
-                    _isMuted ? Icons.volume_off : Icons.volume_up,
-                    color: Colors.white,
-                  ),
-                  onPressed: () {
+                _ReelActionButton(
+                  icon:
+                      _isMuted
+                          ? Icons.volume_off_rounded
+                          : Icons.volume_up_rounded,
+                  onTap: () {
                     widget.mutedListenable.value = !_isMuted;
                   },
                 ),
-                const SizedBox(height: 8),
-                IconButton(
-                  icon: const Icon(Icons.send_outlined, color: Colors.white),
-                  onPressed: () {
+                const SizedBox(height: 10),
+                _ReelActionButton(
+                  icon: Icons.send_rounded,
+                  onTap: () {
                     showModalBottomSheet(
                       context: context,
                       isScrollControlled: true,
@@ -504,6 +710,30 @@ class _ReelPageState extends State<_ReelPage> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _ReelActionButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+
+  const _ReelActionButton({required this.icon, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.black.withOpacity(0.45),
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: SizedBox(
+          width: 44,
+          height: 44,
+          child: Icon(icon, color: Colors.white, size: 23),
+        ),
       ),
     );
   }

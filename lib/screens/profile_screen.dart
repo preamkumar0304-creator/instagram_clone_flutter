@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:instagram_clone_flutter_firebase/methods/firestore_methods.dart';
@@ -168,48 +169,48 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     fontSize: 14,
                   )
                   : isRequested
-                      ? MyElevatedButton(
-                        buttonText: "Requested",
-                        onPressed: () async {
-                          await FirestoreMethods().followUser(
-                            uid: currentUid,
-                            followId: userData["uid"],
-                          );
-                          setState(() {
-                            isRequested = false;
-                          });
-                        },
-                        textClr: Colors.black,
-                        bgClr: Colors.grey.shade200,
-                        radius: 5,
-                        height: 35,
-                        fontSize: 14,
-                      )
-                      : MyElevatedButton(
-                        buttonText: "Follow",
-                        onPressed: () async {
-                          await FirestoreMethods().followUser(
-                            uid: currentUid,
-                            followId: userData["uid"],
-                          );
-                          setState(() {
-                            if (isPublic) {
-                              isFollowing = true;
-                              followers++;
-                              final list = _safeStringList(userData["followers"]);
-                              list.add(currentUid);
-                              userData["followers"] = list;
-                            } else {
-                              isRequested = true;
-                            }
-                          });
-                        },
-                        textClr: Colors.white,
-                        bgClr: blueColor,
-                        radius: 5,
-                        height: 35,
-                        fontSize: 14,
-                      ),
+                  ? MyElevatedButton(
+                    buttonText: "Requested",
+                    onPressed: () async {
+                      await FirestoreMethods().followUser(
+                        uid: currentUid,
+                        followId: userData["uid"],
+                      );
+                      setState(() {
+                        isRequested = false;
+                      });
+                    },
+                    textClr: Colors.black,
+                    bgClr: Colors.grey.shade200,
+                    radius: 5,
+                    height: 35,
+                    fontSize: 14,
+                  )
+                  : MyElevatedButton(
+                    buttonText: "Follow",
+                    onPressed: () async {
+                      await FirestoreMethods().followUser(
+                        uid: currentUid,
+                        followId: userData["uid"],
+                      );
+                      setState(() {
+                        if (isPublic) {
+                          isFollowing = true;
+                          followers++;
+                          final list = _safeStringList(userData["followers"]);
+                          list.add(currentUid);
+                          userData["followers"] = list;
+                        } else {
+                          isRequested = true;
+                        }
+                      });
+                    },
+                    textClr: Colors.white,
+                    bgClr: blueColor,
+                    radius: 5,
+                    height: 35,
+                    fontSize: 14,
+                  ),
         ),
       );
       buttons.add(const SizedBox(width: 5));
@@ -259,91 +260,94 @@ class _ProfileScreenState extends State<ProfileScreen> {
         .doc(widget.uid)
         .snapshots()
         .listen((snap) {
-      final data = snap.data();
-      if (data == null) {
-        setState(() {
-          userData = {};
-          followers = 0;
-          following = 0;
-          isFollowing = false;
-          isLoading = false;
+          final data = snap.data();
+          if (data == null) {
+            setState(() {
+              userData = {};
+              followers = 0;
+              following = 0;
+              isFollowing = false;
+              isLoading = false;
+            });
+            return;
+          }
+          final followersList = _safeStringList(data["followers"]);
+          final followingList = _safeStringList(data["following"]);
+          final requestList = _safeStringList(data["followRequests"]);
+          final currentUid = FirebaseAuth.instance.currentUser?.uid ?? "";
+          final isPublic = data["isPublic"] == true;
+          setState(() {
+            userData = data;
+            followers = followersList.length;
+            following = followingList.length;
+            isFollowing =
+                currentUid.isNotEmpty && followersList.contains(currentUid);
+            isRequested =
+                !isPublic &&
+                currentUid.isNotEmpty &&
+                requestList.contains(currentUid);
+            isLoading = false;
+          });
         });
-        return;
-      }
-      final followersList = _safeStringList(data["followers"]);
-      final followingList = _safeStringList(data["following"]);
-      final requestList = _safeStringList(data["followRequests"]);
-      final currentUid = FirebaseAuth.instance.currentUser?.uid ?? "";
-      final isPublic = data["isPublic"] == true;
-      setState(() {
-        userData = data;
-        followers = followersList.length;
-        following = followingList.length;
-        isFollowing = currentUid.isNotEmpty && followersList.contains(currentUid);
-        isRequested =
-            !isPublic && currentUid.isNotEmpty && requestList.contains(currentUid);
-        isLoading = false;
-      });
-    });
     getData();
     _storySub = FirebaseFirestore.instance
         .collection("stories")
         .where("uid", isEqualTo: widget.uid)
         .snapshots()
         .listen((snap) {
-      if (!mounted) return;
-      final now = DateTime.now();
-      final viewerUid = FirebaseAuth.instance.currentUser?.uid ?? "";
-      var hasStory = false;
-      var hasUnseen = false;
-      for (final doc in snap.docs) {
-        final data = doc.data();
-        final expiresAt = data["expiresAt"];
-        DateTime? expires;
-        if (expiresAt is Timestamp) {
-          expires = expiresAt.toDate();
-        } else if (expiresAt is DateTime) {
-          expires = expiresAt;
-        }
-        if (expires != null && expires.isBefore(now)) {
-          continue;
-        }
-        hasStory = true;
-        if (viewerUid.isEmpty) {
-          hasUnseen = true;
-          continue;
-        }
-        if (viewerUid == widget.uid) {
-          final ownerViewed = data["ownerViewed"] == true;
-          if (!ownerViewed) {
-            hasUnseen = true;
+          if (!mounted) return;
+          final now = DateTime.now();
+          final viewerUid = FirebaseAuth.instance.currentUser?.uid ?? "";
+          var hasStory = false;
+          var hasUnseen = false;
+          for (final doc in snap.docs) {
+            final data = doc.data();
+            final expiresAt = data["expiresAt"];
+            DateTime? expires;
+            if (expiresAt is Timestamp) {
+              expires = expiresAt.toDate();
+            } else if (expiresAt is DateTime) {
+              expires = expiresAt;
+            }
+            if (expires != null && expires.isBefore(now)) {
+              continue;
+            }
+            hasStory = true;
+            if (viewerUid.isEmpty) {
+              hasUnseen = true;
+              continue;
+            }
+            if (viewerUid == widget.uid) {
+              final ownerViewed = data["ownerViewed"] == true;
+              if (!ownerViewed) {
+                hasUnseen = true;
+              }
+            } else {
+              final viewers = _safeStringList(data["viewers"]);
+              if (!viewers.contains(viewerUid)) {
+                hasUnseen = true;
+              }
+            }
+            if (hasUnseen) {
+              break;
+            }
           }
-        } else {
-          final viewers = _safeStringList(data["viewers"]);
-          if (!viewers.contains(viewerUid)) {
-            hasUnseen = true;
-          }
-        }
-        if (hasUnseen) {
-          break;
-        }
-      }
-      setState(() {
-        _hasActiveStory = hasStory;
-        _hasUnseenStory = hasUnseen;
-      });
+          setState(() {
+            _hasActiveStory = hasStory;
+            _hasUnseenStory = hasUnseen;
+          });
 
-      if (!_markedStoriesViewed &&
-          hasStory &&
-          viewerUid.isNotEmpty &&
-          viewerUid != widget.uid) {
-        _markedStoriesViewed = true;
-        FirestoreMethods().markStoriesViewed(
-          ownerUid: widget.uid,
-          viewerUid: viewerUid,
-        );
-      }
-    });
+          if (!_markedStoriesViewed &&
+              hasStory &&
+              viewerUid.isNotEmpty &&
+              viewerUid != widget.uid) {
+            _markedStoriesViewed = true;
+            FirestoreMethods().markStoriesViewed(
+              ownerUid: widget.uid,
+              viewerUid: viewerUid,
+            );
+          }
+        });
   }
 
   @override
@@ -355,10 +359,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> getData() async {
     try {
-      var postSnap = await FirebaseFirestore.instance
-          .collection("posts")
-          .where("uid", isEqualTo: widget.uid)
-          .get();
+      var postSnap =
+          await FirebaseFirestore.instance
+              .collection("posts")
+              .where("uid", isEqualTo: widget.uid)
+              .get();
 
       final since = DateTime.now().subtract(const Duration(days: 30));
       int impressions = 0;
@@ -395,9 +400,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final photoUrl = _safeString(userData["photoUrl"]);
     if (!mounted) return;
     await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => ProfilePhotoView(photoUrl: photoUrl),
-      ),
+      MaterialPageRoute(builder: (_) => ProfilePhotoView(photoUrl: photoUrl)),
     );
   }
 
@@ -421,10 +424,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
         "photoUrl": photoUrl,
       });
 
-      final postsSnap = await FirebaseFirestore.instance
-          .collection("posts")
-          .where("uid", isEqualTo: uid)
-          .get();
+      final postsSnap =
+          await FirebaseFirestore.instance
+              .collection("posts")
+              .where("uid", isEqualTo: uid)
+              .get();
       final batch = FirebaseFirestore.instance.batch();
       for (final doc in postsSnap.docs) {
         batch.update(doc.reference, {"photoUrl": photoUrl});
@@ -529,8 +533,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     Navigator.pop(context);
                     Navigator.of(context).push(
                       MaterialPageRoute(
-                        builder:
-                            (_) => AccountTypeToolsScreen(uid: widget.uid),
+                        builder: (_) => AccountTypeToolsScreen(uid: widget.uid),
                       ),
                     );
                   },
@@ -605,9 +608,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 leading: const Icon(Icons.phone, color: primaryColor),
                 title: const Text("Mobile number"),
                 subtitle: Text(
-                  allowPhoneShare && phone.isNotEmpty
-                      ? phone
-                      : "Not shared",
+                  allowPhoneShare && phone.isNotEmpty ? phone : "Not shared",
                 ),
               ),
               if (!isOwner && (!allowPhoneShare || phone.isEmpty))
@@ -775,10 +776,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
         opaque: true,
         barrierColor: Colors.black,
         pageBuilder:
-            (_, __, ___) => StoryViewerScreen(
-              ownerUid: widget.uid,
-              viewerUid: viewerUid,
-            ),
+            (_, __, ___) =>
+                StoryViewerScreen(ownerUid: widget.uid, viewerUid: viewerUid),
       ),
     );
   }
@@ -796,119 +795,125 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ),
       builder: (context) {
         return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const SizedBox(height: 8),
-              const Text(
-                "Create",
-                style: TextStyle(
-                  color: primaryColor,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 8),
-              ListTile(
-                leading: const Icon(Icons.video_library, color: primaryColor),
-                title: const Text("Reel"),
-                onTap: () {
-                  Navigator.pop(context);
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder:
-                          (_) => const AddPostScreen(
-                            initialCreateType: "reel",
-                          ),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(context).size.height * 0.85,
+            ),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SizedBox(height: 8),
+                  const Text(
+                    "Create",
+                    style: TextStyle(
+                      color: primaryColor,
+                      fontWeight: FontWeight.bold,
                     ),
-                  );
-                },
+                  ),
+                  const SizedBox(height: 8),
+                  ListTile(
+                    leading: const Icon(Icons.video_library, color: primaryColor),
+                    title: const Text("Reel"),
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder:
+                              (_) =>
+                                  const AddPostScreen(initialCreateType: "reel"),
+                        ),
+                      );
+                    },
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.edit, color: primaryColor),
+                    title: const Text("Edits"),
+                    onTap: () {
+                      Navigator.pop(context);
+                      showSnackBar(
+                        context: context,
+                        content: "Edits coming soon.",
+                        clr: secondaryColor,
+                      );
+                    },
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.grid_on, color: primaryColor),
+                    title: const Text("Post"),
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder:
+                              (_) =>
+                                  const AddPostScreen(initialCreateType: "post"),
+                        ),
+                      );
+                    },
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.auto_awesome, color: primaryColor),
+                    title: const Text("Story"),
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder:
+                              (_) =>
+                                  const AddPostScreen(initialCreateType: "story"),
+                        ),
+                      );
+                    },
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.star_border, color: primaryColor),
+                    title: const Text("Highlights"),
+                    onTap: () {
+                      Navigator.pop(context);
+                      _openHighlights();
+                    },
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.wifi_tethering, color: primaryColor),
+                    title: const Text("Live"),
+                    onTap: () {
+                      Navigator.pop(context);
+                      final currentUser = Provider.of<UserProvider>(
+                        context,
+                        listen: false,
+                      ).getUser;
+                      if (currentUser == null) {
+                        showSnackBar(
+                          context: context,
+                          content: "Loading your profile, please try again.",
+                          clr: secondaryColor,
+                        );
+                        return;
+                      }
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => LiveBroadcastScreen(user: currentUser),
+                        ),
+                      );
+                    },
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.auto_awesome, color: primaryColor),
+                    title: const Text("AI"),
+                    onTap: () {
+                      Navigator.pop(context);
+                      showSnackBar(
+                        context: context,
+                        content: "AI tools coming soon.",
+                        clr: secondaryColor,
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                ],
               ),
-              ListTile(
-                leading: const Icon(Icons.edit, color: primaryColor),
-                title: const Text("Edits"),
-                onTap: () {
-                  Navigator.pop(context);
-                  showSnackBar(
-                    context: context,
-                    content: "Edits coming soon.",
-                    clr: secondaryColor,
-                  );
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.grid_on, color: primaryColor),
-                title: const Text("Post"),
-                onTap: () {
-                  Navigator.pop(context);
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder:
-                          (_) => const AddPostScreen(
-                            initialCreateType: "post",
-                          ),
-                    ),
-                  );
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.auto_awesome, color: primaryColor),
-                title: const Text("Story"),
-                onTap: () {
-                  Navigator.pop(context);
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder:
-                          (_) => const AddPostScreen(
-                            initialCreateType: "story",
-                          ),
-                    ),
-                  );
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.star_border, color: primaryColor),
-                title: const Text("Highlights"),
-                onTap: () {
-                  Navigator.pop(context);
-                  _openHighlights();
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.wifi_tethering, color: primaryColor),
-                title: const Text("Live"),
-                onTap: () {
-                  Navigator.pop(context);
-                  final currentUser =
-                      Provider.of<UserProvider>(context, listen: false).getUser;
-                  if (currentUser == null) {
-                    showSnackBar(
-                      context: context,
-                      content: "Loading your profile, please try again.",
-                      clr: secondaryColor,
-                    );
-                    return;
-                  }
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => LiveBroadcastScreen(user: currentUser),
-                    ),
-                  );
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.auto_awesome, color: primaryColor),
-                title: const Text("AI"),
-                onTap: () {
-                  Navigator.pop(context);
-                  showSnackBar(
-                    context: context,
-                    content: "AI tools coming soon.",
-                    clr: secondaryColor,
-                  );
-                },
-              ),
-              const SizedBox(height: 8),
-            ],
+            ),
           ),
         );
       },
@@ -1112,217 +1117,242 @@ class _ProfileScreenState extends State<ProfileScreen> {
         backgroundColor: mobileBackgroundColor,
         appBar: AppBar(
           backgroundColor: mobileBackgroundColor,
+          elevation: 0,
+          scrolledUnderElevation: 0,
           title: MyText(
             text: _safeString(userData["username"]),
             textClr: primaryColor,
-            textSize: 22,
-            textWeight: FontWeight.bold,
+            textSize: 20,
+            textWeight: FontWeight.w700,
           ),
           actions: [
             IconButton(
-              icon: const Icon(Icons.menu, color: primaryColor),
+              icon: const Icon(
+                CupertinoIcons.ellipsis_circle,
+                color: primaryColor,
+              ),
               onPressed: _showProfileMenu,
             ),
           ],
         ),
         body: Padding(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                children: [
-                  GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap:
-                        _hasActiveStory
-                            ? _openStoryViewer
-                            : _showProfilePhotoActions,
-                    child: Stack(
-                      alignment: Alignment.center,
+              Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
+                child: Column(
+                  children: [
+                    Row(
                       children: [
-                        Container(
-                          padding: const EdgeInsets.all(2),
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            gradient:
-                                _hasActiveStory && _hasUnseenStory
-                                    ? const LinearGradient(
-                                      colors: [
-                                        Color(0xFF2C2C2C),
-                                        Color(0xFF5A5A5A),
-                                        Color(0xFF8A8A8A),
-                                        Color(0xFFBDBDBD),
-                                      ],
-                                      begin: Alignment.topLeft,
-                                      end: Alignment.bottomRight,
-                                    )
-                                    : null,
-                            border:
-                                _hasActiveStory
-                                    ? (_hasUnseenStory
-                                        ? null
-                                        : Border.all(
-                                          color: secondaryColor,
-                                          width: 1,
-                                        ))
-                                    : Border.all(
-                                      color: secondaryColor,
-                                      width: 1,
-                                    ),
-                          ),
-                          child: CircleAvatar(
-                            radius: 40,
-                            backgroundImage: (userData["photoUrl"] is String &&
-                                    (userData["photoUrl"] as String).isNotEmpty)
-                                ? NetworkImage(userData["photoUrl"])
-                                : null,
-                            child: (userData["photoUrl"] == null ||
-                                    (userData["photoUrl"] is String &&
-                                        (userData["photoUrl"] as String)
-                                            .isEmpty))
-                                ? const Icon(
-                                    Icons.person,
-                                    size: 40,
-                                    color: Colors.white,
-                                  )
-                                : null,
-                          ),
-                        ),
-                        if (isOwner)
-                          Positioned(
-                            right: 2,
-                            bottom: 2,
-                            child: GestureDetector(
-                              onTap: _openCreateFromProfile,
-                              child: Container(
-                                width: 20,
-                                height: 20,
+                        GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap:
+                              _hasActiveStory
+                                  ? _openStoryViewer
+                                  : _showProfilePhotoActions,
+                          child: Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(2),
                                 decoration: BoxDecoration(
-                                  color: blueColor,
                                   shape: BoxShape.circle,
-                                  border: Border.all(
-                                    color: mobileBackgroundColor,
-                                    width: 2,
-                                  ),
+                                  gradient:
+                                      _hasActiveStory && _hasUnseenStory
+                                          ? const LinearGradient(
+                                            colors: [
+                                              Color(0xFF2C2C2C),
+                                              Color(0xFF5A5A5A),
+                                              Color(0xFF8A8A8A),
+                                              Color(0xFFBDBDBD),
+                                            ],
+                                            begin: Alignment.topLeft,
+                                            end: Alignment.bottomRight,
+                                          )
+                                          : null,
+                                  border:
+                                      _hasActiveStory
+                                          ? (_hasUnseenStory
+                                              ? null
+                                              : Border.all(
+                                                color: secondaryColor,
+                                                width: 1,
+                                              ))
+                                          : Border.all(
+                                            color: secondaryColor,
+                                            width: 1,
+                                          ),
                                 ),
-                                child: const Icon(
-                                  Icons.add,
-                                  size: 14,
-                                  color: Colors.white,
+                                child: CircleAvatar(
+                                  radius: 40,
+                                  backgroundImage:
+                                      (userData["photoUrl"] is String &&
+                                              (userData["photoUrl"] as String)
+                                                  .isNotEmpty)
+                                          ? NetworkImage(userData["photoUrl"])
+                                          : null,
+                                  child:
+                                      (userData["photoUrl"] == null ||
+                                              (userData["photoUrl"] is String &&
+                                                  (userData["photoUrl"]
+                                                          as String)
+                                                      .isEmpty))
+                                          ? const Icon(
+                                            Icons.person_outline_rounded,
+                                            size: 40,
+                                            color: Colors.white,
+                                          )
+                                          : null,
                                 ),
                               ),
+                              if (isOwner)
+                                Positioned(
+                                  right: 2,
+                                  bottom: 2,
+                                  child: GestureDetector(
+                                    onTap: _openCreateFromProfile,
+                                    child: Container(
+                                      width: 20,
+                                      height: 20,
+                                      decoration: BoxDecoration(
+                                        color: blueColor,
+                                        shape: BoxShape.circle,
+                                        border: Border.all(
+                                          color: mobileBackgroundColor,
+                                          width: 2,
+                                        ),
+                                      ),
+                                      child: const Icon(
+                                        Icons.add_rounded,
+                                        size: 14,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              if (isUploadingPhoto)
+                                const SizedBox(
+                                  width: 28,
+                                  height: 28,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 3,
+                                    color: blueColor,
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                        Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 6),
+                                  child: MyText(
+                                    text: _safeString(userData["username"]),
+                                    textClr: primaryColor,
+                                    textSize: 15,
+                                    textWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceEvenly,
+                                  children: [
+                                    statColumn(postLength, "posts"),
+                                    GestureDetector(
+                                      onTap: () {
+                                        final ids = _safeStringList(
+                                          userData["followers"],
+                                        );
+                                        Navigator.of(context).push(
+                                          MaterialPageRoute(
+                                            builder:
+                                                (_) => FollowListScreen(
+                                                  title: "Followers",
+                                                  userIds: ids,
+                                                ),
+                                          ),
+                                        );
+                                      },
+                                      child: statColumn(followers, "followers"),
+                                    ),
+                                    GestureDetector(
+                                      onTap: () {
+                                        final ids = _safeStringList(
+                                          userData["following"],
+                                        );
+                                        Navigator.of(context).push(
+                                          MaterialPageRoute(
+                                            builder:
+                                                (_) => FollowListScreen(
+                                                  title: "Following",
+                                                  userIds: ids,
+                                                ),
+                                          ),
+                                        );
+                                      },
+                                      child: statColumn(following, "following"),
+                                    ),
+                                  ],
+                                ),
+                              ],
                             ),
                           ),
-                        if (isUploadingPhoto)
-                          const SizedBox(
-                            width: 28,
-                            height: 28,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 3,
-                              color: blueColor,
-                            ),
-                          ),
+                        ),
                       ],
                     ),
-                  ),
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8, bottom: 6),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 5),
-                            child: MyText(
-                              text: _safeString(userData["username"]),
-                              textClr: primaryColor,
-                              textSize: 15,
-                              textWeight: FontWeight.bold,
+                          if (_safeString(userData["name"]).isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 2),
+                              child: MyText(
+                                text: _safeString(userData["name"]),
+                                textClr: primaryColor,
+                                textSize: 14,
+                                textWeight: FontWeight.bold,
+                              ),
                             ),
-                          ),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                            children: [
-                              statColumn(postLength, "posts"),
-                              GestureDetector(
-                                onTap: () {
-                                  final ids =
-                                      _safeStringList(userData["followers"]);
-                                  Navigator.of(context).push(
-                                    MaterialPageRoute(
-                                      builder: (_) => FollowListScreen(
-                                        title: "Followers",
-                                        userIds: ids,
-                                      ),
-                                    ),
-                                  );
-                                },
-                                child: statColumn(followers, "followers"),
-                              ),
-                              GestureDetector(
-                                onTap: () {
-                                  final ids =
-                                      _safeStringList(userData["following"]);
-                                  Navigator.of(context).push(
-                                    MaterialPageRoute(
-                                      builder: (_) => FollowListScreen(
-                                        title: "Following",
-                                        userIds: ids,
-                                      ),
-                                    ),
-                                  );
-                                },
-                                child: statColumn(following, "following"),
-                              ),
-                            ],
+                          MyText(
+                            text: _safeString(userData["bio"]),
+                            textClr: primaryColor,
+                            textSize: 14,
                           ),
                         ],
                       ),
                     ),
-                  ),
-                ],
-              ),
-              Padding(
-                padding: const EdgeInsets.only(top: 5, bottom: 5),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (_safeString(userData["name"]).isNotEmpty)
+                    if (_isProfessionalAccount &&
+                        _recentReach >= _dashboardReachThreshold)
                       Padding(
-                        padding: const EdgeInsets.only(bottom: 2),
-                        child: MyText(
-                          text: _safeString(userData["name"]),
-                          textClr: primaryColor,
-                          textSize: 14,
-                          textWeight: FontWeight.bold,
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: _ProfessionalDashboard(
+                          impressions: _recentImpressions,
+                          reach: _recentReach,
+                          onInsightsTap: () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder:
+                                    (_) => const SettingsScreen(
+                                      openInsights: true,
+                                    ),
+                              ),
+                            );
+                          },
                         ),
                       ),
-                    MyText(
-                      text: _safeString(userData["bio"]),
-                      textClr: primaryColor,
-                      textSize: 14,
-                    ),
+                    _buildProfileActions(isOwner),
                   ],
                 ),
               ),
-              if (_isProfessionalAccount &&
-                  _recentReach >= _dashboardReachThreshold)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: _ProfessionalDashboard(
-                    impressions: _recentImpressions,
-                    reach: _recentReach,
-                    onInsightsTap: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => const SettingsScreen(openInsights: true),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              _buildProfileActions(isOwner),
               const SizedBox(height: 8),
               if (canViewPrivate) ...[
                 _buildHighlightsRow(isOwner),
@@ -1336,9 +1366,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   labelColor: primaryColor,
                   unselectedLabelColor: secondaryColor,
                   tabs: const [
-                    Tab(icon: Icon(Icons.grid_on)),
-                    Tab(icon: Icon(Icons.video_library)),
-                    Tab(icon: Icon(Icons.person_pin)),
+                    Tab(icon: Icon(CupertinoIcons.square_grid_3x2)),
+                    Tab(icon: Icon(CupertinoIcons.play_rectangle)),
+                    Tab(icon: Icon(CupertinoIcons.person_crop_square)),
                   ],
                 ),
                 Expanded(
@@ -1435,11 +1465,24 @@ class _HighlightItem extends StatelessWidget {
               height: 52,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                border: Border.all(color: secondaryColor, width: 1),
+                color: Colors.white,
+                border: Border.all(color: Colors.black12, width: 1),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.03),
+                    blurRadius: 8,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
               ),
-              child: icon == null
-                  ? const Icon(Icons.circle, color: secondaryColor, size: 12)
-                  : Icon(icon, color: primaryColor),
+              child:
+                  icon == null
+                      ? const Icon(
+                        Icons.circle,
+                        color: secondaryColor,
+                        size: 12,
+                      )
+                      : Icon(icon, color: primaryColor, size: 20),
             ),
             const SizedBox(height: 6),
             SizedBox(
@@ -1498,15 +1541,10 @@ class _PostsGrid extends StatelessWidget {
               onTap: () {
                 Navigator.push(
                   context,
-                  MaterialPageRoute(
-                    builder: (_) => PostDetailScreen(uid: uid),
-                  ),
+                  MaterialPageRoute(builder: (_) => PostDetailScreen(uid: uid)),
                 );
               },
-              child: Image(
-                fit: BoxFit.cover,
-                image: NetworkImage(postUrl),
-              ),
+              child: Image(fit: BoxFit.cover, image: NetworkImage(postUrl)),
             );
           },
         );
@@ -1542,11 +1580,7 @@ class _ReelsGrid extends StatelessWidget {
     return Container(
       color: Colors.grey.shade200,
       child: const Center(
-        child: Icon(
-          Icons.play_circle_outline,
-          color: secondaryColor,
-          size: 30,
-        ),
+        child: Icon(Icons.play_circle_outline, color: secondaryColor, size: 30),
       ),
     );
   }
@@ -1574,7 +1608,10 @@ class _ReelsGrid extends StatelessWidget {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text("Cancel", style: TextStyle(color: primaryColor)),
+              child: const Text(
+                "Cancel",
+                style: TextStyle(color: primaryColor),
+              ),
             ),
             TextButton(
               onPressed: () => Navigator.pop(context, true),
@@ -1605,47 +1642,39 @@ class _ReelsGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream:
-          FirebaseFirestore.instance
-              .collection("reels")
-              .snapshots(),
+      stream: FirebaseFirestore.instance.collection("reels").snapshots(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(
             child: CircularProgressIndicator(color: primaryColor),
           );
         }
-        final allDocs =
-            List<QueryDocumentSnapshot<Map<String, dynamic>>>.from(
-              snapshot.data?.docs ?? [],
-            );
-        final docs =
-            allDocs
-                .where((doc) => _matchesOwner(doc.data()))
-                .toList(growable: false);
+        final allDocs = List<QueryDocumentSnapshot<Map<String, dynamic>>>.from(
+          snapshot.data?.docs ?? [],
+        );
+        final docs = allDocs
+            .where((doc) => _matchesOwner(doc.data()))
+            .toList(growable: false);
         docs.sort((a, b) {
           final aData = a.data();
           final bData = b.data();
           final aTime =
-              _extractTime(aData["createdAt"]).isAfter(
-                    _extractTime(aData["timestamp"]),
-                  )
+              _extractTime(
+                    aData["createdAt"],
+                  ).isAfter(_extractTime(aData["timestamp"]))
                   ? _extractTime(aData["createdAt"])
                   : _extractTime(aData["timestamp"]);
           final bTime =
-              _extractTime(bData["createdAt"]).isAfter(
-                    _extractTime(bData["timestamp"]),
-                  )
+              _extractTime(
+                    bData["createdAt"],
+                  ).isAfter(_extractTime(bData["timestamp"]))
                   ? _extractTime(bData["createdAt"])
                   : _extractTime(bData["timestamp"]);
           return bTime.compareTo(aTime);
         });
         if (docs.isEmpty) {
           return const Center(
-            child: Text(
-              "No reels yet.",
-              style: TextStyle(color: primaryColor),
-            ),
+            child: Text("No reels yet.", style: TextStyle(color: primaryColor)),
           );
         }
         final currentUid = FirebaseAuth.instance.currentUser?.uid ?? "";
@@ -1832,11 +1861,7 @@ class _ReelThumbnailState extends State<_ReelThumbnail> {
         if (bytes == null || bytes.isEmpty) {
           return widget.fallback;
         }
-        return Image.memory(
-          bytes,
-          fit: BoxFit.cover,
-          gaplessPlayback: true,
-        );
+        return Image.memory(bytes, fit: BoxFit.cover, gaplessPlayback: true);
       },
     );
   }
@@ -1889,10 +1914,7 @@ class _ProfessionalDashboard extends StatelessWidget {
         children: [
           const Text(
             "Professional dashboard",
-            style: TextStyle(
-              color: primaryColor,
-              fontWeight: FontWeight.bold,
-            ),
+            style: TextStyle(color: primaryColor, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 4),
           Text(
@@ -1967,7 +1989,11 @@ class _MetricTile extends StatelessWidget {
   }
 }
 
-Widget _highlightItem({IconData? icon, required String label, VoidCallback? onTap}) {
+Widget _highlightItem({
+  IconData? icon,
+  required String label,
+  VoidCallback? onTap,
+}) {
   return _HighlightItem(icon: icon, label: label, onTap: onTap);
 }
 

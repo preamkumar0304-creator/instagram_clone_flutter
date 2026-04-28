@@ -159,9 +159,9 @@ class _PostCardState extends State<PostCard> {
         viewerUid: viewer.uid,
       );
     }
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => ProfileScreen(uid: uid)),
-    );
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => ProfileScreen(uid: uid)));
   }
 
   Future<void> _recordViewIfNeeded() async {
@@ -204,10 +204,7 @@ class _PostCardState extends State<PostCard> {
                   child: CircularProgressIndicator(color: primaryColor),
                 );
               }
-              return CommentsBottomSheet(
-                snap: widget.snap,
-                snapshot: snapshot,
-              );
+              return CommentsBottomSheet(snap: widget.snap, snapshot: snapshot);
             },
           ),
     );
@@ -245,9 +242,9 @@ class _PostCardState extends State<PostCard> {
   void _openImageViewer(String url) {
     if (url.isEmpty) return;
     AudioManager.instance.stopAudio();
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => ImageViewerScreen(imageUrl: url)),
-    );
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => ImageViewerScreen(imageUrl: url)));
   }
 
   Future<void> _hideUserPosts(String ownerUid) async {
@@ -286,8 +283,8 @@ class _PostCardState extends State<PostCard> {
           child: ListView.separated(
             shrinkWrap: true,
             itemCount: reasons.length + 1,
-            separatorBuilder: (_, __) =>
-                const Divider(color: secondaryColor, height: 1),
+            separatorBuilder:
+                (_, __) => const Divider(color: secondaryColor, height: 1),
             itemBuilder: (context, index) {
               if (index == 0) {
                 return Padding(
@@ -350,433 +347,460 @@ class _PostCardState extends State<PostCard> {
     final showAudio = hasAudioName && (location.isEmpty || _showAudioLabel);
     final labelText = showAudio ? audioName : location;
     final isMuted = AudioManager.instance.isMuted;
-    final isPlaying = AudioManager.instance.isPlaying &&
+    final isPlaying =
+        AudioManager.instance.isPlaying &&
         AudioManager.instance.currentPostId == postId;
+    final likes =
+        (widget.snap["likes"] as List?)?.whereType<String>().toList() ??
+        <String>[];
+    final likedByUser = user != null && likes.contains(user.uid);
     return VisibilityDetector(
       key: ValueKey("post-$postId"),
       onVisibilityChanged: _handleVisibility,
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8),
+        padding: const EdgeInsets.fromLTRB(10, 8, 10, 12),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            child: Row(
-              children: [
-                GestureDetector(
-                  onTap: _openProfile,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(color: secondaryColor, width: 1),
-                    ),
-                    child: CircleAvatar(
-                      radius: 16,
-                      backgroundImage:
-                          photoUrl.isNotEmpty ? NetworkImage(photoUrl) : null,
-                      backgroundColor: Colors.grey.shade300,
-                      child:
-                          photoUrl.isEmpty
-                              ? const Icon(
-                                FeatherIcons.user,
-                                color: Colors.black,
-                                size: 20,
-                              )
-                              : null,
-                    ),
-                  ),
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
                 ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: GestureDetector(
-                    onTap: _openProfile,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          username,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: GoogleFonts.inter(
-                            color: Colors.black,
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                          ),
+                child: Row(
+                  children: [
+                    GestureDetector(
+                      onTap: _openProfile,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.black12),
                         ),
-                        if (labelText.isNotEmpty) ...[
-                          const SizedBox(height: 3),
-                          Text(
-                            labelText,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: GoogleFonts.inter(
-                              color: Colors.grey,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w400,
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ),
-                if (!isOwner)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 6),
-                    child: TextButton(
-                      onPressed: () => _toggleFollow(ownerUid),
-                      style: TextButton.styleFrom(
-                        backgroundColor:
-                            isFollowing
-                                ? Colors.grey.shade200
-                                : Colors.black,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 4,
-                        ),
-                        minimumSize: const Size(0, 28),
-                        shape: const StadiumBorder(),
-                      ),
-                      child: Text(
-                        isFollowing ? "Following" : "Follow",
-                        style: GoogleFonts.inter(
-                          color: isFollowing ? Colors.black : Colors.white,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ),
-                  ),
-                IconButton(
-                  onPressed: () {
-                  showDialog(
-                    context: context,
-                    builder: (context) {
-                      final isPostOwner = widget.snap["uid"] == user!.uid;
-
-                      return SimpleDialog(
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        children: [
-                          if (isPostOwner)
-                            SimpleDialogOption(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 14,
-                              ),
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    FeatherIcons.trash2,
-                                    color: Colors.redAccent,
-                                    size: 22,
-                                  ),
-                                  SizedBox(width: 10),
-                                  Text(
-                                    "Delete Post",
-                                    style: GoogleFonts.inter(
-                                      color: Colors.redAccent,
-                                      fontWeight: FontWeight.w600,
-                                      fontSize: 16,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              onPressed: () async {
-                                await FirestoreMethods().deletePost(
-                                  context,
-                                  widget.snap["postId"],
-                                );
-                                if (context.mounted)
-                                  Navigator.of(context).pop();
-                              },
-                            )
-                          else ...[
-                            SimpleDialogOption(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 14,
-                              ),
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    FeatherIcons.eyeOff,
+                        child: CircleAvatar(
+                          radius: 17,
+                          backgroundImage:
+                              photoUrl.isNotEmpty
+                                  ? NetworkImage(photoUrl)
+                                  : null,
+                          backgroundColor: Colors.grey.shade300,
+                          child:
+                              photoUrl.isEmpty
+                                  ? const Icon(
+                                    Icons.person_outline_rounded,
                                     color: Colors.black,
-                                    size: 22,
-                                  ),
-                                  SizedBox(width: 10),
-                                  Text(
-                                    "Not Interested",
-                                    style: GoogleFonts.inter(
-                                      color: Colors.black,
-                                      fontWeight: FontWeight.w500,
-                                      fontSize: 16,
-                                    ),
-                                  ),
-                                ],
+                                    size: 18,
+                                  )
+                                  : null,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: _openProfile,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              username,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.inter(
+                                color: Colors.black,
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: 0.1,
                               ),
-                              onPressed: () {
-                                Navigator.of(context).pop();
-                                _hideUserPosts(ownerUid);
-                              },
                             ),
-                            SimpleDialogOption(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 14,
-                              ),
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    FeatherIcons.alertTriangle,
-                                    color: Colors.redAccent,
-                                    size: 22,
+                            if (labelText.isNotEmpty) ...[
+                              const SizedBox(height: 3),
+                              AnimatedSwitcher(
+                                duration: const Duration(milliseconds: 220),
+                                switchInCurve: Curves.easeOut,
+                                switchOutCurve: Curves.easeIn,
+                                child: Text(
+                                  labelText,
+                                  key: ValueKey(labelText),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: GoogleFonts.inter(
+                                    color: Colors.grey.shade600,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w400,
                                   ),
-                                  SizedBox(width: 10),
-                                  Text(
-                                    "Report Ad",
-                                    style: GoogleFonts.inter(
-                                      color: Colors.redAccent,
-                                      fontWeight: FontWeight.w500,
-                                      fontSize: 16,
-                                    ),
-                                  ),
-                                ],
+                                ),
                               ),
-                              onPressed: () {
-                                Navigator.of(context).pop();
-                                _showReportSheet();
-                              },
-                            ),
+                            ],
                           ],
-                        ],
-                      );
-                    },
+                        ),
+                      ),
+                    ),
+                    if (!isOwner)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: TextButton(
+                          onPressed: () => _toggleFollow(ownerUid),
+                          style: TextButton.styleFrom(
+                            backgroundColor:
+                                isFollowing
+                                    ? Colors.grey.shade100
+                                    : Colors.black,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 4,
+                            ),
+                            minimumSize: const Size(0, 28),
+                            shape: const StadiumBorder(),
+                          ),
+                          child: Text(
+                            isFollowing ? "Following" : "Follow",
+                            style: GoogleFonts.inter(
+                              color: isFollowing ? Colors.black : Colors.white,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                      ),
+                    IconButton(
+                      onPressed: () {
+                        showDialog(
+                          context: context,
+                          builder: (context) {
+                            final isPostOwner = widget.snap["uid"] == user?.uid;
+                            return SimpleDialog(
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              children: [
+                                if (isPostOwner)
+                                  SimpleDialogOption(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 16,
+                                      vertical: 14,
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        const Icon(
+                                          FeatherIcons.trash2,
+                                          color: Colors.redAccent,
+                                          size: 22,
+                                        ),
+                                        const SizedBox(width: 10),
+                                        Text(
+                                          "Delete Post",
+                                          style: GoogleFonts.inter(
+                                            color: Colors.redAccent,
+                                            fontWeight: FontWeight.w600,
+                                            fontSize: 16,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    onPressed: () async {
+                                      await FirestoreMethods().deletePost(
+                                        context,
+                                        widget.snap["postId"],
+                                      );
+                                      if (context.mounted) {
+                                        Navigator.of(context).pop();
+                                      }
+                                    },
+                                  )
+                                else ...[
+                                  SimpleDialogOption(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 16,
+                                      vertical: 14,
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        const Icon(
+                                          FeatherIcons.eyeOff,
+                                          color: Colors.black,
+                                          size: 22,
+                                        ),
+                                        const SizedBox(width: 10),
+                                        Text(
+                                          "Not Interested",
+                                          style: GoogleFonts.inter(
+                                            color: Colors.black,
+                                            fontWeight: FontWeight.w500,
+                                            fontSize: 16,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    onPressed: () {
+                                      Navigator.of(context).pop();
+                                      _hideUserPosts(ownerUid);
+                                    },
+                                  ),
+                                  SimpleDialogOption(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 16,
+                                      vertical: 14,
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        const Icon(
+                                          FeatherIcons.alertTriangle,
+                                          color: Colors.redAccent,
+                                          size: 22,
+                                        ),
+                                        const SizedBox(width: 10),
+                                        Text(
+                                          "Report Ad",
+                                          style: GoogleFonts.inter(
+                                            color: Colors.redAccent,
+                                            fontWeight: FontWeight.w500,
+                                            fontSize: 16,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    onPressed: () {
+                                      Navigator.of(context).pop();
+                                      _showReportSheet();
+                                    },
+                                  ),
+                                ],
+                              ],
+                            );
+                          },
+                        );
+                      },
+                      icon: const Icon(
+                        Icons.more_horiz_rounded,
+                        color: Colors.black,
+                        size: 24,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              GestureDetector(
+                onDoubleTap: () async {
+                  if (user == null) return;
+                  await FirestoreMethods().likePost(
+                    widget.snap["postId"],
+                    user.uid,
+                    widget.snap["likes"],
                   );
+                  setState(() {
+                    isLikeAnimating = true;
+                  });
                 },
-                  icon: const Icon(
-                    FeatherIcons.moreVertical,
-                    color: Colors.black,
-                    size: 22,
-                  ),
+                onTap:
+                    () => _openImageViewer(_safeString(widget.snap["postUrl"])),
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(14),
+                      child: SizedBox(
+                        width: double.infinity,
+                        height: MediaQuery.of(context).size.height * 0.45,
+                        child: Image.network(
+                          fit: BoxFit.cover,
+                          widget.snap["postUrl"],
+                        ),
+                      ),
+                    ),
+                    if (audioUrl.isNotEmpty)
+                      Positioned(
+                        top: 10,
+                        right: 10,
+                        child: GestureDetector(
+                          onTap: () async {
+                            await AudioManager.instance.toggleMute();
+                            if (!AudioManager.instance.isMuted && _isVisible) {
+                              final start =
+                                  widget.snap["audioStart"] is num
+                                      ? (widget.snap["audioStart"] as num)
+                                          .toDouble()
+                                      : 0.0;
+                              final end =
+                                  widget.snap["audioEnd"] is num
+                                      ? (widget.snap["audioEnd"] as num)
+                                          .toDouble()
+                                      : 0.0;
+                              await AudioManager.instance.playAudio(
+                                postId,
+                                audioUrl,
+                                start,
+                                end,
+                              );
+                            }
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: Colors.black54,
+                              borderRadius: BorderRadius.circular(18),
+                            ),
+                            child: Icon(
+                              isMuted
+                                  ? Icons.volume_off_rounded
+                                  : (isPlaying
+                                      ? Icons.volume_up_rounded
+                                      : Icons.volume_down_rounded),
+                              color: Colors.white,
+                              size: 20,
+                            ),
+                          ),
+                        ),
+                      ),
+                    AnimatedOpacity(
+                      duration: const Duration(milliseconds: 160),
+                      opacity: isLikeAnimating ? 1 : 0,
+                      child: LikeAnimation(
+                        isAnimating: isLikeAnimating,
+                        duration: const Duration(milliseconds: 420),
+                        onEnd: () {
+                          setState(() {
+                            isLikeAnimating = false;
+                          });
+                        },
+                        child: const Icon(
+                          Icons.favorite_rounded,
+                          color: Colors.white,
+                          size: 104,
+                          shadows: [
+                            Shadow(color: Colors.black45, blurRadius: 14),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 8),
-          GestureDetector(
-            onDoubleTap: () async {
-              await FirestoreMethods().likePost(
-                widget.snap["postId"],
-                user!.uid,
-                widget.snap["likes"],
-              );
-              setState(() {
-                isLikeAnimating = true;
-              });
-            },
-            onTap: () => _openImageViewer(_safeString(widget.snap["postUrl"])),
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                SizedBox(
-                  width: double.infinity,
-                  height: MediaQuery.of(context).size.height * 0.45,
-                  child: Image.network(
-                    fit: BoxFit.cover,
-                    widget.snap["postUrl"],
-                  ),
-                ),
-                if (audioUrl.isNotEmpty)
-                  Positioned(
-                    top: 8,
-                    right: 8,
-                    child: GestureDetector(
+              ),
+              const SizedBox(height: 8),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Row(
+                  children: [
+                    _ActionCount(
+                      count: likes.length.toString(),
                       onTap: () async {
-                        await AudioManager.instance.toggleMute();
-                        if (!AudioManager.instance.isMuted && _isVisible) {
-                          final start =
-                              widget.snap["audioStart"] is num
-                                  ? (widget.snap["audioStart"] as num)
-                                      .toDouble()
-                                  : 0.0;
-                          final end =
-                              widget.snap["audioEnd"] is num
-                                  ? (widget.snap["audioEnd"] as num).toDouble()
-                                  : 0.0;
-                          await AudioManager.instance.playAudio(
-                            postId,
-                            audioUrl,
-                            start,
-                            end,
-                          );
+                        if (user == null) return;
+                        await FirestoreMethods().likePost(
+                          widget.snap["postId"],
+                          user.uid,
+                          widget.snap["likes"],
+                        );
+                      },
+                      child: LikeAnimation(
+                        isAnimating: likedByUser,
+                        smallLike: true,
+                        child: Icon(
+                          likedByUser
+                              ? Icons.favorite_rounded
+                              : Icons.favorite_border_rounded,
+                          color: likedByUser ? Colors.red : Colors.black,
+                          size: 24,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 18),
+                    _ActionCount(
+                      count: commentL.toString(),
+                      onTap: _openComments,
+                      child: const Icon(
+                        Icons.chat_bubble_outline_rounded,
+                        color: Colors.black,
+                        size: 23,
+                      ),
+                    ),
+                    const SizedBox(width: 18),
+                    _ActionCount(
+                      count: shareCount.toString(),
+                      onTap: _openShareSheet,
+                      child: const Icon(
+                        Icons.send_rounded,
+                        color: Colors.black,
+                        size: 22,
+                      ),
+                    ),
+                    const Spacer(),
+                    IconButton(
+                      onPressed: () async {
+                        if (user == null || postId.isEmpty) return;
+                        await FirestoreMethods().toggleSavePost(
+                          uid: user.uid,
+                          postId: postId,
+                          isSaved: isSaved,
+                        );
+                        if (context.mounted) {
+                          await Provider.of<UserProvider>(
+                            context,
+                            listen: false,
+                          ).refreshUser();
                         }
                       },
-                      child: Container(
-                        padding: const EdgeInsets.all(6),
-                        decoration: BoxDecoration(
-                          color: Colors.black54,
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: Icon(
-                          isMuted
-                              ? FeatherIcons.volumeX
-                              : (isPlaying
-                                  ? FeatherIcons.volume2
-                                  : FeatherIcons.volume1),
-                          color: Colors.white,
-                          size: 20,
-                        ),
+                      icon: Icon(
+                        isSaved
+                            ? Icons.bookmark_rounded
+                            : Icons.bookmark_border_rounded,
+                        color: Colors.black,
+                        size: 24,
                       ),
                     ),
-                  ),
-                AnimatedOpacity(
-                  duration: const Duration(milliseconds: 200),
-                  opacity: isLikeAnimating ? 1 : 0,
-                  child: LikeAnimation(
-                    isAnimating: isLikeAnimating,
-                    duration: const Duration(milliseconds: 400),
-                    onEnd: () {
-                      setState(() {
-                        isLikeAnimating = false;
-                      });
-                    },
-                    child: const Icon(
-                      FeatherIcons.heart,
-                      color: Colors.black,
-                      size: 24,
-                    ),
-                  ),
+                  ],
                 ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 8),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: Row(
-              children: [
-                _ActionCount(
-                  count: widget.snap["likes"].length.toString(),
-                  onTap: () async {
-                    await FirestoreMethods().likePost(
-                      widget.snap["postId"],
-                      user.uid,
-                      widget.snap["likes"],
-                    );
-                  },
-                  child: LikeAnimation(
-                    isAnimating: widget.snap["likes"].contains(user!.uid),
-                    smallLike: true,
-                    child:
-                        widget.snap["likes"].contains(user.uid)
-                            ? const Icon(
-                              FeatherIcons.heart,
-                              color: Colors.black,
-                              size: 22,
-                            )
-                            : const Icon(
-                              FeatherIcons.heart,
-                              color: Colors.black,
-                              size: 22,
-                            ),
-                  ),
-                ),
-                const SizedBox(width: 18),
-                _ActionCount(
-                  count: commentL.toString(),
-                  onTap: _openComments,
-                  child: const Icon(
-                    FeatherIcons.messageCircle,
-                    color: Colors.black,
-                    size: 22,
-                  ),
-                ),
-                const SizedBox(width: 18),
-                _ActionCount(
-                  count: shareCount.toString(),
-                  onTap: _openShareSheet,
-                  child: const Icon(
-                    FeatherIcons.send,
-                    color: Colors.black,
-                    size: 22,
-                  ),
-                ),
-                const Spacer(),
-                IconButton(
-                  onPressed: () async {
-                    if (user == null || postId.isEmpty) return;
-                    await FirestoreMethods().toggleSavePost(
-                      uid: user.uid,
-                      postId: postId,
-                      isSaved: isSaved,
-                    );
-                    if (context.mounted) {
-                      await Provider.of<UserProvider>(
-                        context,
-                        listen: false,
-                      ).refreshUser();
-                    }
-                  },
-                  icon: Icon(
-                    isSaved ? FeatherIcons.bookmark : FeatherIcons.bookmark,
-                    color: isSaved ? Colors.black : Colors.black54,
-                    size: 22,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 4),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: Row(
-              children: [
-                RichText(
-                  text: TextSpan(
-                    children: [
-                      TextSpan(
-                        text: widget.snap["username"],
-                        style: GoogleFonts.inter(
-                          color: Colors.black,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 15,
-                        ),
-                      ),
-                      TextSpan(
-                        text: "  ${widget.snap["caption"]}",
-                        style: GoogleFonts.inter(
-                          color: Colors.black,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w400,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: MyText(
-                text: DateFormat.yMMMd().format(
-                  widget.snap["postedDate"].toDate(),
-                ),
-                textClr: secondaryColor,
-                textSize: 12,
               ),
-            ),
-          ),
-          const SizedBox(height: 6),
-        ],
+              const SizedBox(height: 2),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: RichText(
+                        text: TextSpan(
+                          children: [
+                            TextSpan(
+                              text: widget.snap["username"],
+                              style: GoogleFonts.inter(
+                                color: Colors.black,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 14,
+                              ),
+                            ),
+                            TextSpan(
+                              text: "  ${widget.snap["caption"]}",
+                              style: GoogleFonts.inter(
+                                color: Colors.black87,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w400,
+                                height: 1.25,
+                              ),
+                            ),
+                          ],
+                        ),
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 4, 12, 10),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: MyText(
+                    text: DateFormat.yMMMd().format(
+                      widget.snap["postedDate"].toDate(),
+                    ),
+                    textClr: Colors.grey.shade600,
+                    textSize: 12,
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
-    ),
-  );
+    );
   }
 }
 

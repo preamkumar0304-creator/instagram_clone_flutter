@@ -1,4 +1,5 @@
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:instagram_clone_flutter_firebase/utils/audio_manager.dart';
 import 'package:instagram_clone_flutter_firebase/utils/colors.dart';
@@ -21,8 +22,8 @@ class _MobileScreenLayoutState extends State<MobileScreenLayout> {
   void _onNavTap(int page) {
     _pageController.animateToPage(
       page,
-      duration: const Duration(milliseconds: 200),
-      curve: Curves.easeInOut,
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOutCubic,
     );
   }
 
@@ -85,47 +86,66 @@ class _MobileScreenLayoutState extends State<MobileScreenLayout> {
       child: Scaffold(
         bottomNavigationBar: SafeArea(
           top: false,
-          child: SizedBox(
-            height: kBottomNavigationBarHeight + 6,
-            child: BottomNavigationBar(
-              type: BottomNavigationBarType.fixed,
-              backgroundColor: mobileBackgroundColor,
-              selectedItemColor: primaryColor,
-              unselectedItemColor: secondaryColor,
-              iconSize: 26,
-              selectedFontSize: 0,
-              unselectedFontSize: 0,
-              showSelectedLabels: false,
-              showUnselectedLabels: false,
-              items: const [
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.home_outlined),
-                  activeIcon: Icon(Icons.home),
-                  label: "",
-                ),
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.search_outlined),
-                  activeIcon: Icon(Icons.search),
-                  label: "",
-                ),
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.play_circle_outline),
-                  activeIcon: Icon(Icons.play_circle),
-                  label: "",
-                ),
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.chat_bubble_outline),
-                  activeIcon: Icon(Icons.chat_bubble),
-                  label: "",
-                ),
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.person_outline),
-                  activeIcon: Icon(Icons.person),
-                  label: "",
+          child: Container(
+            margin: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+            decoration: BoxDecoration(
+              color: mobileBackgroundColor,
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(color: Colors.black12),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.06),
+                  blurRadius: 18,
+                  offset: const Offset(0, 8),
                 ),
               ],
-              currentIndex: _currentIndex,
-              onTap: _onNavTap,
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(22),
+              child: SizedBox(
+                height: kBottomNavigationBarHeight + 6,
+                child: BottomNavigationBar(
+                  type: BottomNavigationBarType.fixed,
+                  backgroundColor: mobileBackgroundColor,
+                  elevation: 0,
+                  selectedItemColor: primaryColor,
+                  unselectedItemColor: Colors.black54,
+                  iconSize: 25,
+                  selectedFontSize: 0,
+                  unselectedFontSize: 0,
+                  showSelectedLabels: false,
+                  showUnselectedLabels: false,
+                  items: const [
+                    BottomNavigationBarItem(
+                      icon: Icon(CupertinoIcons.house),
+                      activeIcon: Icon(CupertinoIcons.house_fill),
+                      label: "",
+                    ),
+                    BottomNavigationBarItem(
+                      icon: Icon(CupertinoIcons.compass),
+                      activeIcon: Icon(CupertinoIcons.compass_fill),
+                      label: "",
+                    ),
+                    BottomNavigationBarItem(
+                      icon: Icon(CupertinoIcons.play_rectangle),
+                      activeIcon: Icon(CupertinoIcons.play_rectangle_fill),
+                      label: "",
+                    ),
+                    BottomNavigationBarItem(
+                      icon: Icon(CupertinoIcons.chat_bubble),
+                      activeIcon: Icon(CupertinoIcons.chat_bubble_fill),
+                      label: "",
+                    ),
+                    BottomNavigationBarItem(
+                      icon: Icon(CupertinoIcons.person_crop_circle),
+                      activeIcon: Icon(CupertinoIcons.person_crop_circle_fill),
+                      label: "",
+                    ),
+                  ],
+                  currentIndex: _currentIndex,
+                  onTap: _onNavTap,
+                ),
+              ),
             ),
           ),
         ),
